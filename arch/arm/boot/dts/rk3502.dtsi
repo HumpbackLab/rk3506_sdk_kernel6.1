@@ -1276,6 +1276,11 @@
 			#size-cells = <0>;
 			status = "disabled";
 		};
+
+		flexbus_dshot: dshot {
+			compatible = "rockchip,rk3506-flexbus-dshot";
+			status = "disabled";
+		};
 	};
 
 	grf_pmu: syscon@ff910000 {

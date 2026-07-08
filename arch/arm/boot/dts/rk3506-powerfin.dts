@@ -12,6 +12,7 @@
 
 #include "rk3506.dtsi"
 #include "rk3506-pinctrl.dtsi"
+#include <dt-bindings/mfd/rockchip-flexbus.h>
 #include <dt-bindings/pinctrl/rockchip.h>
 #include <dt-bindings/input/rk-input.h>
 #include <dt-bindings/sensor-dev.h>
@@ -273,9 +274,16 @@
 &spi0 {
 	status = "okay";
 	pinctrl-names = "default";
-	pinctrl-0 = <&spi0_clk_pins &spi0_csn0_pins &spi0_csn1_pins>;
+	pinctrl-0 = <&spi0_clk_pins &spi0_csn0_pins>;
 	cs-gpios = <&gpio0 RK_PC3 GPIO_ACTIVE_LOW>;	/* Pin127 SPI0_CSN0 */
-	num-cs = <2>;
+	num-cs = <1>;
+
+	spidev@0 {
+		compatible = "rockchip,spidev";
+		reg = <0>;
+		spi-max-frequency = <24000000>;
+		status = "okay";
+	};
 };
 
 /* ====================================================================
@@ -286,10 +294,25 @@
 &spi1 {
 	status = "okay";
 	pinctrl-names = "default";
-	pinctrl-0 = <&spi1_clk_pins &spi1_csn0_pins &spi1_csn1_pins>;
+	pinctrl-0 = <&rm_io9_spi1_clk &rm_io8_spi1_miso
+		     &rm_io7_spi1_mosi &spi1_gpio_cs_pins>;
 	cs-gpios = <&gpio0 RK_PA5 GPIO_ACTIVE_LOW>,	/* Pin16 SPI1_CSN0 */
 		   <&gpio0 RK_PA6 GPIO_ACTIVE_LOW>;	/* Pin15 SPI1_CSN1 */
 	num-cs = <2>;
+
+	spidev@0 {
+		compatible = "rockchip,spidev";
+		reg = <0>;
+		spi-max-frequency = <24000000>;
+		status = "okay";
+	};
+
+	spidev@1 {
+		compatible = "rockchip,spidev";
+		reg = <1>;
+		spi-max-frequency = <24000000>;
+		status = "okay";
+	};
 };
 
 /* ====================================================================
@@ -307,9 +330,6 @@
  * rm_io21_wdt_tsadc_shut: GPIO0_C5 func=92 (WDT_TSADC_SHUT idx=77, 15+77=92)
  * ==================================================================== */
 &tsadc {
-	pinctrl-names = "gpio", "otpout";
-	pinctrl-0 = <&wdt_tsadc_gpio>;
-	pinctrl-1 = <&rm_io21_wdt_tsadc_shut>;
 	status = "okay";
 };
 
@@ -346,6 +366,26 @@
  * (GPIO1_A0-A3 非 RM_IO，使用 GPIO 模式或 FLEXBUS1_D0-D3)
  * TODO: 确认 PWM 外设通道，此处暂配为 GPIO 输出
  * ==================================================================== */
+
+/* ====================================================================
+ * FlexBUS DShot — 4 通道同步输出
+ * ch0..ch3 = flexbus0_d0..d3
+ *
+ * 注意: FlexBUS1_D0-D3 是 RX-only，不能用于 DShot 输出。
+ * ==================================================================== */
+&flexbus {
+	rockchip,flexbus0-opmode = <ROCKCHIP_FLEXBUS0_OPMODE_DSHOT>;
+	rockchip,flexbus1-opmode = <ROCKCHIP_FLEXBUS1_OPMODE_NULL>;
+	status = "okay";
+};
+
+&flexbus_dshot {
+	pinctrl-names = "default";
+	pinctrl-0 = <&flexbus0_d0_pins &flexbus0_d1_pins
+		     &flexbus0_d2_pins &flexbus0_d3_pins>;
+	rockchip,dshot-rate = <600000>;
+	status = "okay";
+};
 
 /* ====================================================================
  * 禁用未使用外设
@@ -448,6 +488,15 @@
 			rockchip,pins =
 				<0 RK_PC5 33 &pcfg_pull_up>,	/* GPIO0_C5=RM_IO21 → I2C1_SDA */
 				<0 RK_PC4 32 &pcfg_pull_up>;	/* GPIO0_C4=RM_IO20 → I2C1_SCL */
+		};
+	};
+
+	/* ---- SPI1 GPIO CS: 避免通用 spi1_csn0_pins 占用 GPIO0_B6/RM_IO14 ---- */
+	spi1 {
+		spi1_gpio_cs_pins: spi1-gpio-cs-pins {
+			rockchip,pins =
+				<0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_up>,	/* Pin16 SPI1_CSN0 */
+				<0 RK_PA6 RK_FUNC_GPIO &pcfg_pull_up>;	/* Pin15 SPI1_CSN1 */
 		};
 	};
 
