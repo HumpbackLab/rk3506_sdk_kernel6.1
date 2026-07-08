@@ -1,0 +1,490 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024 Rockchip Electronics Co., Ltd.
+ *
+ * RK3506G PowerFin 飞控板 DTS (SD卡启动)
+ *
+ * RM_IO pinctrl 编码: func = 15 + RM_IO_index
+ * 参考: RK3506_TRM_Part1_V1.2, Table 1-9 RM_IO Function List
+ */
+
+/dts-v1/;
+
+#include "rk3506.dtsi"
+#include "rk3506-pinctrl.dtsi"
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/input/rk-input.h>
+#include <dt-bindings/sensor-dev.h>
+
+/ {
+	model = "RK3506G PowerFin";
+	compatible = "rockchip,rk3506g-powerfin", "rockchip,rk3506";
+
+	chosen {
+		bootargs = "earlycon=uart8250,mmio32,0xff0a0000 console=ttyFIQ0 storagemedia=sd root=/dev/mmcblk0p3 rootfstype=ext4 rootwait";
+	};
+
+	/* ================================================================
+	 * 电源
+	 * ================================================================ */
+	vcc_sys: vcc-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_sys";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+	};
+
+	vcc_3v3: vcc-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vcc_1v8: vcc-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_1v8";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_3v3>;
+	};
+
+	vcc_ddr: vcc-ddr {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_ddr";
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vdd_0v9: vdd-0v9 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_0v9";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <900000>;
+		regulator-max-microvolt = <900000>;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vdd_cpu: vdd-cpu {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_cpu";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <500000>;
+		regulator-max-microvolt = <1500000>;
+	};
+
+	/* ================================================================
+	 * ADC 按键 (SARADC ch1 = Pin62)
+	 * ================================================================ */
+	adc_keys: adc-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 1>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+	};
+
+	/* ================================================================
+	 * FIQ Debugger (UART0)
+	 * ================================================================ */
+	fiq_debugger: fiq-debugger {
+		compatible = "rockchip,fiq-debugger";
+		rockchip,serial-id = <0>;
+		rockchip,wake-irq = <0>;
+		rockchip,irq-mode-enable = <1>;
+		rockchip,baudrate = <1500000>;	/* Only 115200 and 1500000 */
+		interrupts = <GIC_SPI 115 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+	};
+
+	/* ================================================================
+	 * LED — GPIO3_B2 (Pin30: LED_SIG), 低电平点亮
+	 * ================================================================ */
+	leds: leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&led_sig_pin>;
+
+		status_led: status-led {
+			label = "sys_status";
+			gpios = <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "heartbeat";
+		};
+	};
+};
+
+/* ====================================================================
+ * CPU
+ * ==================================================================== */
+&cpu0 {
+	cpu-supply = <&vdd_cpu>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * UART0 — 控制台 (Pin123: UART0_RX / Pin124: UART0_TX)
+ * 直接功能: GPIO0_C7 func=1 / GPIO0_C6 func=1
+ * ==================================================================== */
+/* UART0 pin mux — 参考 Luckfox Lyra, pinctrl 由 fiq-debugger 自行处理 */
+&uart0 {
+	status = "disabled";
+};
+
+/* ====================================================================
+ * UART1 (Pin106: GPIO1_C2_d=RM_IO27→UART1_RX / Pin107: GPIO1_C3_d=RM_IO28→UART1_TX)
+ * RM_IO: UART1_RX idx=2, UART1_TX idx=1
+ * ==================================================================== */
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_rm_pins>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * UART2 (Pin18: GPIO0_A3_d=RM_IO3→UART2_RX / Pin17: GPIO0_A4_d=RM_IO4→UART2_TX)
+ * RM_IO: UART2_RX idx=4, UART2_TX idx=3
+ * ==================================================================== */
+&uart2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2_rm_pins>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * UART3 (Pin6: GPIO0_B4_d=RM_IO12→UART3_RX / Pin7: GPIO0_B3_d=RM_IO11→UART3_TX)
+ * RM_IO: UART3_RX idx=6, UART3_TX idx=5
+ * ⚠️ Pin40/41 (SD_D3/D2) 也与 UART3_RX/TX 共享网络，不要同时使能
+ * ==================================================================== */
+&uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3_rm_pins>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * UART4 (Pin97: GPIO1_B2_d=RM_IO25→UART4_RX / Pin98: GPIO1_B3_d=RM_IO26→UART4_TX)
+ * RM_IO: UART4_RX idx=10, UART4_TX idx=9
+ * ==================================================================== */
+&uart4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart4_rm_pins>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * UART5 (Pin29: GPIO3_B3→UART5_RX_M0 / Pin28: GPIO3_B4→UART5_TX_M0)
+ * 直接功能: GPIO3_B3/B4 func=1
+ * ==================================================================== */
+&uart5 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart5m0_xfer_pins>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * CAN0 (Pin21: GPIO0_A0_u=RM_IO0→CAN0_TX / Pin20: GPIO0_A1_d=RM_IO1→CAN0_RX)
+ * RM_IO: CAN0_TX idx=28, CAN0_RX idx=29
+ * ==================================================================== */
+&can0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&can0_rm_pins>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * I2C0 (Pin4: GPIO0_B6_d=RM_IO14→I2C0_SDA / Pin5: GPIO0_B5_d=RM_IO13→I2C0_SCL)
+ * RM_IO: I2C0_SDA idx=16, I2C0_SCL idx=15
+ * ==================================================================== */
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_rm_pins>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * I2C1 (Pin125: GPIO0_C5_z=RM_IO21→I2C1_SDA / Pin126: GPIO0_C4_d=RM_IO20→I2C1_SCL)
+ * RM_IO: I2C1_SDA idx=18, I2C1_SCL idx=17
+ * ==================================================================== */
+&i2c1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1_rm_pins>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * I2C2 — 未使用（原 Lyra 触摸屏，本板改为 CAN0）
+ * ==================================================================== */
+&i2c2 {
+	status = "disabled";
+};
+
+/* ====================================================================
+ * SDMMC — SD 卡 (Pin35-38,40,41)
+ * ⚠️ SD_CD (Pin101 GPIO1_B6) 和 SD_PWREN (Pin102 GPIO1_B7) 硬件 NC
+ * ==================================================================== */
+&mmc {
+	max-frequency = <52000000>;
+	bus-width = <4>;
+	no-sdio;
+	no-mmc;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	disable-wp;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc_clk_pins &sdmmc_cmd_pins &sdmmc_bus4_pins>;
+	vqmmc-supply = <&vcc_3v3>;
+	vmmc-supply = <&vcc_3v3>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * FSPI — SPI Flash (Pin53 FSPI_D3 / Pin54 FSPI_CLK / Pin55 FSPI_D0 /
+ *                     Pin57 FSPI_D2 / Pin58 FSPI_D1 / Pin59 FSPI_CSN)
+ * ==================================================================== */
+&fspi {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&fspi_bus4_pins &fspi_clk_pins &fspi_csn_pins>;
+
+	flash@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		spi-max-frequency = <80000000>;
+		spi-rx-bus-width = <4>;
+		spi-tx-bus-width = <1>;
+	};
+};
+
+/* ====================================================================
+ * SPI0 — IMU (Pin1 SPI0_MOSI / Pin2 SPI0_SCK / Pin128 SPI0_MISO / Pin127 SPI0_CS)
+ * 直接功能: GPIO0_C0-C3 func=1
+ * IMU_INT: Pin3 GPIO0_B7 用作 GPIO 输入中断
+ * ==================================================================== */
+&spi0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0_clk_pins &spi0_csn0_pins &spi0_csn1_pins>;
+	cs-gpios = <&gpio0 RK_PC3 GPIO_ACTIVE_LOW>;	/* Pin127 SPI0_CSN0 */
+	num-cs = <2>;
+};
+
+/* ====================================================================
+ * SPI1 (Pin12 SPI1_SCLK / Pin13 SPI1_MISO / Pin14 SPI1_MOSI /
+ *       Pin15 SPI1_CS1 / Pin16 SPI1_CS0)
+ * 直接功能: GPIO0_A5-A7,B0-B1 func=1
+ * ==================================================================== */
+&spi1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi1_clk_pins &spi1_csn0_pins &spi1_csn1_pins>;
+	cs-gpios = <&gpio0 RK_PA5 GPIO_ACTIVE_LOW>,	/* Pin16 SPI1_CSN0 */
+		   <&gpio0 RK_PA6 GPIO_ACTIVE_LOW>;	/* Pin15 SPI1_CSN1 */
+	num-cs = <2>;
+};
+
+/* ====================================================================
+ * SARADC
+ * CH0 = Pin63 SARADC_IN0, CH1 = Pin62 SARADC_IN1 (ADC按键)
+ * CH2 = Pin61 SARADC_IN2 = CURR_ADC (电流检测), CH3 = Pin60 = NC
+ * ==================================================================== */
+&saradc {
+	vref-supply = <&vcc_1v8>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * TSADC — 温度传感器
+ * rm_io21_wdt_tsadc_shut: GPIO0_C5 func=92 (WDT_TSADC_SHUT idx=77, 15+77=92)
+ * ==================================================================== */
+&tsadc {
+	pinctrl-names = "gpio", "otpout";
+	pinctrl-0 = <&wdt_tsadc_gpio>;
+	pinctrl-1 = <&rm_io21_wdt_tsadc_shut>;
+	status = "okay";
+};
+
+/* ====================================================================
+ * USB OTG0 — Device (Pin71: OTG0_DN / Pin72: OTG0_DP)
+ * USB OTG1 — Host   (Pin73: OTG1_DN / Pin74: OTG1_DP)
+ * ==================================================================== */
+&usb20_otg0 {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usb20_otg1 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&usb2phy {
+	status = "okay";
+};
+
+&u2phy_otg0 {
+	status = "okay";
+};
+
+&u2phy_otg1 {
+	status = "okay";
+};
+
+/* ====================================================================
+ * PWM 电机输出
+ * M1_OUT: Pin89  GPIO1_A3_d  M2_OUT: Pin88  GPIO1_A2_d
+ * M3_OUT: Pin84  GPIO1_A1_d  M4_OUT: Pin83  GPIO1_A0_d
+ * (GPIO1_A0-A3 非 RM_IO，使用 GPIO 模式或 FLEXBUS1_D0-D3)
+ * TODO: 确认 PWM 外设通道，此处暂配为 GPIO 输出
+ * ==================================================================== */
+
+/* ====================================================================
+ * 禁用未使用外设
+ * ==================================================================== */
+&dsi {          /* MIPI DSI — Pin77-82 全部 NC */
+	status = "disabled";
+};
+
+&dsi_dphy {
+	status = "disabled";
+};
+
+&gmac1 {        /* ETH RMII0 — Pin42-50 全部 NC */
+	status = "disabled";
+};
+
+&mdio1 {
+	status = "disabled";
+};
+
+&route_dsi {
+	status = "disabled";
+};
+
+&vop {
+	status = "disabled";
+};
+
+&display_subsystem {
+	status = "disabled";
+};
+
+/* ====================================================================
+ * Pinctrl — 自定义引脚
+ *
+ * RM_IO 编码: func = 15 + RM_IO_function_index (参见 TRM Table 1-9)
+ * ├── GPIO0 系列: RM_IO func code 用于 RM_IO 路由
+ * └── GPIO1 系列(B1/B2/B3/C2/C3/D1/D2/D3): 同样适用
+ *
+ * 非 RM_IO 引脚 (GPIO1_A0-A3): 使用直接功能码或 GPIO 模式
+ * ==================================================================== */
+&pinctrl {
+	/* ---- UART1: RM_IO27(RX idx=2→func=17) + RM_IO28(TX idx=1→func=16) ---- */
+	uart1 {
+		uart1_rm_pins: uart1-rm-pins {
+			rockchip,pins =
+				<1 RK_PC2 17 &pcfg_pull_up>,	/* GPIO1_C2=RM_IO27 → UART1_RX */
+				<1 RK_PC3 16 &pcfg_pull_up>;	/* GPIO1_C3=RM_IO28 → UART1_TX */
+		};
+	};
+
+	/* ---- UART2: RM_IO3(RX idx=4→func=19) + RM_IO4(TX idx=3→func=18) ---- */
+	uart2 {
+		uart2_rm_pins: uart2-rm-pins {
+			rockchip,pins =
+				<0 RK_PA3 19 &pcfg_pull_up>,	/* GPIO0_A3=RM_IO3 → UART2_RX */
+				<0 RK_PA4 18 &pcfg_pull_up>;	/* GPIO0_A4=RM_IO4 → UART2_TX */
+		};
+	};
+
+	/* ---- UART3: RM_IO12(RX idx=6→func=21) + RM_IO11(TX idx=5→func=20) ---- */
+	uart3 {
+		uart3_rm_pins: uart3-rm-pins {
+			rockchip,pins =
+				<0 RK_PB4 21 &pcfg_pull_up>,	/* GPIO0_B4=RM_IO12 → UART3_RX */
+				<0 RK_PB3 20 &pcfg_pull_up>;	/* GPIO0_B3=RM_IO11 → UART3_TX */
+		};
+	};
+
+	/* ---- UART4: RM_IO25(RX idx=10→func=25) + RM_IO26(TX idx=9→func=24) ---- */
+	uart4 {
+		uart4_rm_pins: uart4-rm-pins {
+			rockchip,pins =
+				<1 RK_PB2 25 &pcfg_pull_up>,	/* GPIO1_B2=RM_IO25 → UART4_RX */
+				<1 RK_PB3 24 &pcfg_pull_up>;	/* GPIO1_B3=RM_IO26 → UART4_TX */
+		};
+	};
+
+	/* ---- CAN0: RM_IO0(TX idx=28→func=43) + RM_IO1(RX idx=29→func=44) ---- */
+	can0 {
+		can0_rm_pins: can0-rm-pins {
+			rockchip,pins =
+				<0 RK_PA0 43 &pcfg_pull_none>,	/* GPIO0_A0=RM_IO0 → CAN0_TX */
+				<0 RK_PA1 44 &pcfg_pull_none>;	/* GPIO0_A1=RM_IO1 → CAN0_RX */
+		};
+	};
+
+	/* ---- I2C0: RM_IO14(SDA idx=16→func=31) + RM_IO13(SCL idx=15→func=30) ---- */
+	i2c0 {
+		i2c0_rm_pins: i2c0-rm-pins {
+			rockchip,pins =
+				<0 RK_PB6 31 &pcfg_pull_up>,	/* GPIO0_B6=RM_IO14 → I2C0_SDA */
+				<0 RK_PB5 30 &pcfg_pull_up>;	/* GPIO0_B5=RM_IO13 → I2C0_SCL */
+		};
+	};
+
+	/* ---- I2C1: RM_IO21(SDA idx=18→func=33) + RM_IO20(SCL idx=17→func=32) ---- */
+	i2c1 {
+		i2c1_rm_pins: i2c1-rm-pins {
+			rockchip,pins =
+				<0 RK_PC5 33 &pcfg_pull_up>,	/* GPIO0_C5=RM_IO21 → I2C1_SDA */
+				<0 RK_PC4 32 &pcfg_pull_up>;	/* GPIO0_C4=RM_IO20 → I2C1_SCL */
+		};
+	};
+
+	/* ---- IMU 中断 (Pin3: GPIO0_B7_d = RM_IO15 → 用作 GPIO 输入) ---- */
+	imu {
+		imu_int_pin: imu-int-pin {
+			rockchip,pins =
+				<0 RK_PB7 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	/* ---- LED_SIG (Pin30: GPIO3_B2_d) ---- */
+	led_sig {
+		led_sig_pin: led-sig-pin {
+			rockchip,pins =
+				<3 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	/* ---- 电机输出 M1-M4 (GPIO1_A0-A3, 非RM_IO引脚, GPIO模式) ---- */
+	motor {
+		motor_out_pins: motor-out-pins {
+			rockchip,pins =
+				<1 RK_PA0 RK_FUNC_GPIO &pcfg_pull_none>,	/* Pin83  M4_OUT */
+				<1 RK_PA1 RK_FUNC_GPIO &pcfg_pull_none>,	/* Pin84  M3_OUT */
+				<1 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>,	/* Pin88  M2_OUT */
+				<1 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>;	/* Pin89  M1_OUT */
+		};
+	};
+
+	/* ---- SBUS (Pin15/16 SPI1_CS0/CS1 也可作 UART) ---- */
+
+	/* ---- TSADC ---- */
+	tsadc {
+		wdt_tsadc_gpio: wdt-tsadc-gpio {
+			rockchip,pins =
+				<0 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
