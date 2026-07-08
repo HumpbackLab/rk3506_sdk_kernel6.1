@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/misc/rockchip-flexbus-dshot.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Rockchip Flexbus DShot protocol output
+
+maintainers:
+  - Rockchip Electronics Co., Ltd.
+
+description:
+  The Rockchip Flexbus controller can generate one-bit sampled waveforms through
+  its transmit channel. This binding describes a Flexbus child device that
+  encodes and transmits four synchronized DShot frames on flexbus0 data outputs.
+  The driver uses a 4-bit Flexbus transfer width, with data bit 0 through bit 3
+  mapped to DShot channel 0 through channel 3.
+
+properties:
+  compatible:
+    const: rockchip,rk3506-flexbus-dshot
+
+  rockchip,dshot-rate:
+    description:
+      DShot bit rate in Hz. Common values are 150000, 300000, 600000 and
+      1200000. If omitted, DShot600 is used.
+    minimum: 150000
+    maximum: 1200000
+    default: 600000
+
+  rockchip,telemetry:
+    description:
+      Enable the telemetry request bit in transmitted DShot frames by default.
+    type: boolean
+
+required:
+  - compatible
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/mfd/rockchip-flexbus.h>
+
+    flexbus@ff880000 {
+        compatible = "rockchip,rk3506-flexbus";
+        reg = <0xff880000 0x200>;
+        rockchip,flexbus0-opmode = <ROCKCHIP_FLEXBUS0_OPMODE_DSHOT>;
+        rockchip,flexbus1-opmode = <ROCKCHIP_FLEXBUS1_OPMODE_NULL>;
+
+        dshot {
+            compatible = "rockchip,rk3506-flexbus-dshot";
+            rockchip,dshot-rate = <600000>;
+        };
+    };
+
+...

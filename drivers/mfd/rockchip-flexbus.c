@@ -153,7 +153,7 @@ static int rockchip_flexbus_probe(struct platform_device *pdev)
 	if (ret)
 		rkfb->opmode0 = ROCKCHIP_FLEXBUS0_OPMODE_NULL;
 	if (rkfb->opmode0 < ROCKCHIP_FLEXBUS0_OPMODE_NULL ||
-	    rkfb->opmode0 > ROCKCHIP_FLEXBUS0_OPMODE_SPI)
+	    rkfb->opmode0 > ROCKCHIP_FLEXBUS0_OPMODE_DSHOT)
 		return -EINVAL;
 
 	ret = device_property_read_u32(&pdev->dev, "rockchip,flexbus1-opmode", &rkfb->opmode1);

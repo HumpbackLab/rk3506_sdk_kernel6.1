@@ -17,3 +17,15 @@ config PCIE_FUNC_RKEP_USERPAGES
 	help
 	  Enable this configuration option to reserve continuous physical space
           for user layer in Rockchip's EP demo function driver.
+
+config ROCKCHIP_FLEXBUS_DSHOT
+	tristate "Rockchip Flexbus DShot protocol driver"
+	depends on ARCH_ROCKCHIP
+	depends on OF
+	select MFD_ROCKCHIP_FLEXBUS
+	help
+	  Select this to drive one DShot output through Rockchip Flexbus0.
+
+	  The driver exposes a misc character device. Writing a throttle value
+	  sends one DShot frame; ioctls can select the DShot bit rate, telemetry
+	  bit and raw 11-bit command value.
