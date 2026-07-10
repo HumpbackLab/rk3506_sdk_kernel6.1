@@ -384,6 +384,7 @@
 	pinctrl-0 = <&flexbus0_d0_pins &flexbus0_d1_pins
 		     &flexbus0_d2_pins &flexbus0_d3_pins>;
 	rockchip,dshot-rate = <600000>;
+	rockchip,dshot-polarity = "invert";
 	status = "okay";
 };
 

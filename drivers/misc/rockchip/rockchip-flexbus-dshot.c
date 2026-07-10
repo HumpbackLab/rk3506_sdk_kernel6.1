@@ -27,12 +27,13 @@
 #define RK_DSHOT_DEFAULT_RATE		600000
 #define RK_DSHOT_MIN_RATE		150000
 #define RK_DSHOT_MAX_RATE		1200000
-#define RK_DSHOT_SAMPLES_PER_BIT	8
+#define RK_DSHOT_MIN_SAMPLES_PER_BIT	16
+#define RK_DSHOT_MAX_SAMPLES_PER_BIT	128
 #define RK_DSHOT_FRAME_BITS		16
 #define RK_DSHOT_CHANNELS		4
-#define RK_DSHOT_ZERO_HIGH		3
-#define RK_DSHOT_ONE_HIGH		6
-#define RK_DSHOT_DMA_LEN		64
+#define RK_DSHOT_DEFAULT_SAMPLES_PER_BIT	64
+#define RK_DSHOT_MAX_TX_SAMPLES		(RK_DSHOT_FRAME_BITS * RK_DSHOT_MAX_SAMPLES_PER_BIT)
+#define RK_DSHOT_MAX_DMA_LEN		round_up(DIV_ROUND_UP(RK_DSHOT_MAX_TX_SAMPLES, 2), 0x40)
 #define RK_DSHOT_TIMEOUT_MS		100
 
 #define RK_DSHOT_IOCTL_BASE		'D'
@@ -64,11 +65,17 @@ struct rk_flexbus_dshot {
 	u8 *tx_buf;
 	dma_addr_t tx_dma;
 	u32 rate;
+	u32 actual_rate;
+	u32 tx_clk_rate;
+	u32 samples_per_bit;
+	u32 tx_samples;
+	u32 dma_len;
 	u16 last_value[RK_DSHOT_CHANNELS];
 	bool telemetry;
+	bool inverted;
 };
 
-static u16 rk_dshot_make_frame(u16 value, bool telemetry)
+static u16 rk_dshot_make_frame(u16 value, bool telemetry, bool inverted)
 {
 	u16 packet = (value << 1) | telemetry;
 	u16 csum = 0;
@@ -80,21 +87,23 @@ static u16 rk_dshot_make_frame(u16 value, bool telemetry)
 		csum_data >>= 4;
 	}
 
+	if (inverted)
+		csum = ~csum;
+
 	return (packet << 4) | (csum & 0xf);
 }
 
-static void rk_dshot_set_sample(u8 *buf, unsigned int index, unsigned int channel,
-				bool high)
+static void rk_dshot_set_sample(u8 *buf, unsigned int index, unsigned int channel, bool high)
 {
 	u8 mask = BIT(channel);
-
-	if (!high)
-		return;
 
 	if (index & 1)
 		mask <<= 4;
 
-	buf[index / 2] |= mask;
+	if (high)
+		buf[index / 2] |= mask;
+	else
+		buf[index / 2] &= ~mask;
 }
 
 static void rk_dshot_encode(struct rk_flexbus_dshot *dshot, const u16 value[RK_DSHOT_CHANNELS])
@@ -103,58 +112,95 @@ static void rk_dshot_encode(struct rk_flexbus_dshot *dshot, const u16 value[RK_D
 	unsigned int sample = 0;
 	int bit, channel, i, high_time;
 
-	memset(dshot->tx_buf, 0, RK_DSHOT_DMA_LEN);
+	memset(dshot->tx_buf, dshot->inverted ? 0xff : 0x00, dshot->dma_len);
 	for (channel = 0; channel < RK_DSHOT_CHANNELS; channel++)
-		frame[channel] = rk_dshot_make_frame(value[channel], dshot->telemetry);
+		frame[channel] = rk_dshot_make_frame(value[channel], dshot->telemetry,
+						     dshot->inverted);
 
 	for (bit = RK_DSHOT_FRAME_BITS - 1; bit >= 0; bit--) {
-		for (i = 0; i < RK_DSHOT_SAMPLES_PER_BIT; i++) {
+		for (i = 0; i < dshot->samples_per_bit; i++) {
 			for (channel = 0; channel < RK_DSHOT_CHANNELS; channel++) {
 				high_time = (frame[channel] & BIT(bit)) ?
-					    RK_DSHOT_ONE_HIGH : RK_DSHOT_ZERO_HIGH;
+					    DIV_ROUND_CLOSEST(dshot->samples_per_bit * 3, 4) :
+					    DIV_ROUND_CLOSEST(dshot->samples_per_bit * 3, 8);
 				rk_dshot_set_sample(dshot->tx_buf, sample, channel,
-						    i < high_time);
+						    dshot->inverted ? i >= high_time : i < high_time);
 			}
 			sample++;
 		}
 	}
 }
 
+static void rk_dshot_update_timing(struct rk_flexbus_dshot *dshot,
+				   u32 rate, u32 tx_clk_rate, u32 samples_per_bit)
+{
+	dshot->rate = rate;
+	dshot->tx_clk_rate = tx_clk_rate;
+	dshot->samples_per_bit = samples_per_bit;
+	dshot->actual_rate = DIV_ROUND_CLOSEST(tx_clk_rate, samples_per_bit * 2);
+	dshot->tx_samples = RK_DSHOT_FRAME_BITS * samples_per_bit;
+	dshot->dma_len = round_up(DIV_ROUND_UP(dshot->tx_samples, 2), 0x40);
+}
+
 static int rk_dshot_set_rate(struct rk_flexbus_dshot *dshot, u32 rate)
 {
+	u32 best_samples = RK_DSHOT_DEFAULT_SAMPLES_PER_BIT;
+	u32 best_clk_rate = rate * best_samples * 2;
+	u32 best_error = U32_MAX;
+	u32 samples;
 	int ret;
 
 	if (rate < RK_DSHOT_MIN_RATE || rate > RK_DSHOT_MAX_RATE)
 		return -EINVAL;
 
-	ret = clk_set_rate(dshot->fb->clks[0].clk,
-			   rate * RK_DSHOT_SAMPLES_PER_BIT * 2);
+	for (samples = RK_DSHOT_MIN_SAMPLES_PER_BIT;
+	     samples <= RK_DSHOT_MAX_SAMPLES_PER_BIT; samples++) {
+		unsigned long target = rate * samples * 2;
+		long rounded = clk_round_rate(dshot->fb->clks[0].clk, target);
+		u32 actual_rate;
+		u32 error;
+
+		if (rounded <= 0)
+			continue;
+
+		actual_rate = DIV_ROUND_CLOSEST_ULL(rounded, samples * 2);
+		error = abs((int)actual_rate - (int)rate);
+		if (error < best_error || (error == best_error && samples > best_samples)) {
+			best_error = error;
+			best_samples = samples;
+			best_clk_rate = rounded;
+		}
+	}
+
+	ret = clk_set_rate(dshot->fb->clks[0].clk, best_clk_rate);
 	if (ret)
 		return ret;
 
-	dshot->rate = rate;
+	rk_dshot_update_timing(dshot, rate, clk_get_rate(dshot->fb->clks[0].clk),
+			       best_samples);
+
+	dev_dbg(dshot->dev, "rate=%u actual=%u tx_clk=%u samples_per_bit=%u error=%d\n",
+		dshot->rate, dshot->actual_rate, dshot->tx_clk_rate,
+		dshot->samples_per_bit, (int)dshot->actual_rate - (int)dshot->rate);
 
 	return 0;
 }
 
-static int rk_dshot_xmit_locked(struct rk_flexbus_dshot *dshot,
-				const u16 value[RK_DSHOT_CHANNELS])
+static int rk_dshot_xmit_buf_locked(struct rk_flexbus_dshot *dshot)
 {
 	struct rockchip_flexbus *fb = dshot->fb;
-	u32 num = RK_DSHOT_FRAME_BITS * RK_DSHOT_SAMPLES_PER_BIT;
 	int ret = 0;
 
 	reinit_completion(&dshot->completion);
 	dshot->result = RK_DSHOT_ERR;
 
-	rk_dshot_encode(dshot, value);
-
 	rockchip_flexbus_writel(fb, FLEXBUS_ICR, RK_DSHOT_ISR);
 	rockchip_flexbus_writel(fb, FLEXBUS_COM_CTL, FLEXBUS_TX_ONLY);
-	rockchip_flexbus_writel(fb, FLEXBUS_TX_NUM, num);
+	rockchip_flexbus_writel(fb, FLEXBUS_TX_NUM, dshot->tx_samples);
 	rockchip_flexbus_writel(fb, FLEXBUS_TXWAT_START, 16);
 	rockchip_flexbus_writel(fb, FLEXBUS_DMA_SRC_ADDR0, dshot->tx_dma >> 2);
-	rockchip_flexbus_writel(fb, FLEXBUS_DMA_SRC_LEN0, RK_DSHOT_DMA_LEN);
+	rockchip_flexbus_writel(fb, FLEXBUS_DMA_SRC_LEN0, dshot->dma_len);
+	rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_TX_DIS);
 	rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_TX_ENR);
 
 	if (!wait_for_completion_timeout(&dshot->completion,
@@ -163,7 +209,17 @@ static int rk_dshot_xmit_locked(struct rk_flexbus_dshot *dshot,
 	else if (dshot->result != RK_DSHOT_DONE)
 		ret = -EIO;
 
-	rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_TX_DIS);
+	return ret;
+}
+
+static int rk_dshot_xmit_locked(struct rk_flexbus_dshot *dshot,
+				const u16 value[RK_DSHOT_CHANNELS])
+{
+	int ret;
+
+	rk_dshot_encode(dshot, value);
+	ret = rk_dshot_xmit_buf_locked(dshot);
+
 	memcpy(dshot->last_value, value, sizeof(dshot->last_value));
 
 	return ret;
@@ -195,8 +251,17 @@ static void rk_dshot_irq_handler(struct rockchip_flexbus *fb, u32 isr)
 
 	rockchip_flexbus_writel(fb, FLEXBUS_ICR, isr & RK_DSHOT_ISR);
 
+	if (isr & FLEXBUS_TX_DONE_ISR) {
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_TX_DIS);
+		dshot->result = RK_DSHOT_DONE;
+		complete(&dshot->completion);
+		return;
+	}
+
 	if (isr & RK_DSHOT_ERR_ISR) {
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_TX_DIS);
 		dshot->result = RK_DSHOT_ERR;
+		dev_err_ratelimited(dshot->dev, "transfer error isr=0x%08x\n", isr);
 		if (isr & FLEXBUS_DMA_TIMEOUT_ISR)
 			dev_err_ratelimited(dshot->dev, "dma timeout\n");
 		if (isr & FLEXBUS_DMA_ERR_ISR)
@@ -205,12 +270,6 @@ static void rk_dshot_irq_handler(struct rockchip_flexbus *fb, u32 isr)
 			dev_err_ratelimited(dshot->dev, "tx underflow\n");
 		if (isr & FLEXBUS_TX_OVF_ISR)
 			dev_err_ratelimited(dshot->dev, "tx overflow\n");
-		complete(&dshot->completion);
-		return;
-	}
-
-	if (isr & FLEXBUS_TX_DONE_ISR) {
-		dshot->result = RK_DSHOT_DONE;
 		complete(&dshot->completion);
 	}
 }
@@ -242,6 +301,33 @@ static ssize_t rate_hz_store(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 static DEVICE_ATTR_RW(rate_hz);
+
+static ssize_t actual_rate_hz_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct rk_flexbus_dshot *dshot = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n", dshot->actual_rate);
+}
+static DEVICE_ATTR_RO(actual_rate_hz);
+
+static ssize_t tx_clock_hz_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct rk_flexbus_dshot *dshot = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n", dshot->tx_clk_rate);
+}
+static DEVICE_ATTR_RO(tx_clock_hz);
+
+static ssize_t samples_per_bit_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct rk_flexbus_dshot *dshot = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n", dshot->samples_per_bit);
+}
+static DEVICE_ATTR_RO(samples_per_bit);
 
 static ssize_t telemetry_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -287,6 +373,9 @@ static DEVICE_ATTR_RO(channels);
 
 static struct attribute *rk_dshot_attrs[] = {
 	&dev_attr_rate_hz.attr,
+	&dev_attr_actual_rate_hz.attr,
+	&dev_attr_tx_clock_hz.attr,
+	&dev_attr_samples_per_bit.attr,
 	&dev_attr_telemetry.attr,
 	&dev_attr_last_value.attr,
 	&dev_attr_channels.attr,
@@ -450,7 +539,6 @@ static int rk_dshot_hw_init(struct rk_flexbus_dshot *dshot)
 {
 	struct rockchip_flexbus *fb = dshot->fb;
 	u32 tx_ctl = fb->dfs_reg->dfs_4bit | FLEXBUS_TX_CTL_MSB;
-	int ret;
 
 	fb->config->grf_config(fb, false, false, false);
 
@@ -462,9 +550,35 @@ static int rk_dshot_hw_init(struct rk_flexbus_dshot *dshot)
 	rockchip_flexbus_writel(fb, FLEXBUS_TX_CTL, tx_ctl);
 	rockchip_flexbus_writel(fb, FLEXBUS_IMR, RK_DSHOT_ISR);
 
-	ret = rk_dshot_set_rate(dshot, dshot->rate);
-	if (ret)
-		return ret;
+	return rk_dshot_set_rate(dshot, dshot->rate);
+}
+
+static int rk_dshot_parse_polarity(struct device *dev, struct rk_flexbus_dshot *dshot)
+{
+	const char *polarity;
+	int ret;
+
+	dshot->inverted = true;
+
+	ret = device_property_read_string(dev, "rockchip,dshot-polarity", &polarity);
+	if (!ret) {
+		if (!strcmp(polarity, "normal")) {
+			dshot->inverted = false;
+			return 0;
+		}
+		if (!strcmp(polarity, "invert") || !strcmp(polarity, "inverted")) {
+			dshot->inverted = true;
+			return 0;
+		}
+
+		return dev_err_probe(dev, -EINVAL,
+				     "invalid rockchip,dshot-polarity: %s\n", polarity);
+	}
+
+	if (device_property_read_bool(dev, "rockchip,normal-dshot"))
+		dshot->inverted = false;
+	if (device_property_read_bool(dev, "rockchip,inverted-dshot"))
+		dshot->inverted = true;
 
 	return 0;
 }
@@ -498,8 +612,11 @@ static int rk_dshot_probe(struct platform_device *pdev)
 
 	device_property_read_u32(&pdev->dev, "rockchip,dshot-rate", &dshot->rate);
 	dshot->telemetry = device_property_read_bool(&pdev->dev, "rockchip,telemetry");
+	ret = rk_dshot_parse_polarity(&pdev->dev, dshot);
+	if (ret)
+		goto err_mutex;
 
-	dshot->tx_buf = dmam_alloc_coherent(dshot->dev, RK_DSHOT_DMA_LEN, &dshot->tx_dma,
+	dshot->tx_buf = dmam_alloc_coherent(dshot->dev, RK_DSHOT_MAX_DMA_LEN, &dshot->tx_dma,
 					    GFP_KERNEL | __GFP_ZERO);
 	if (!dshot->tx_buf) {
 		ret = -ENOMEM;
@@ -528,8 +645,11 @@ static int rk_dshot_probe(struct platform_device *pdev)
 		goto err_fb0;
 	dev_set_drvdata(dshot->miscdev.this_device, dshot);
 
-	dev_info(&pdev->dev, "channels=%u rate=%u telemetry=%u\n",
-		 RK_DSHOT_CHANNELS, dshot->rate, dshot->telemetry);
+	dev_info(&pdev->dev,
+		 "channels=%u rate=%u actual=%u tx_clk=%u samples_per_bit=%u telemetry=%u polarity=%s\n",
+		 RK_DSHOT_CHANNELS, dshot->rate, dshot->actual_rate,
+		 dshot->tx_clk_rate, dshot->samples_per_bit, dshot->telemetry,
+		 dshot->inverted ? "inverted" : "normal");
 
 	return 0;
 
