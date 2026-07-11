@@ -99,7 +99,6 @@ struct rk_flexbus_dshot {
 	u32 tx_samples;
 	u32 dma_len;
 	u32 passthrough_actual_sample_rate;
-	u16 last_value[RK_DSHOT_CHANNELS];
 	bool telemetry;
 	bool inverted;
 	bool passthrough_rx_reversed;
@@ -302,8 +301,6 @@ static int rk_dshot_xmit_locked(struct rk_flexbus_dshot *dshot,
 
 	rk_dshot_encode(dshot, value);
 	ret = rk_dshot_xmit_buf_locked(dshot);
-
-	memcpy(dshot->last_value, value, sizeof(dshot->last_value));
 
 	return ret;
 }
@@ -581,33 +578,6 @@ static ssize_t rate_hz_store(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RW(rate_hz);
 
-static ssize_t actual_rate_hz_show(struct device *dev,
-				   struct device_attribute *attr, char *buf)
-{
-	struct rk_flexbus_dshot *dshot = dev_get_drvdata(dev);
-
-	return sysfs_emit(buf, "%u\n", dshot->actual_rate);
-}
-static DEVICE_ATTR_RO(actual_rate_hz);
-
-static ssize_t tx_clock_hz_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct rk_flexbus_dshot *dshot = dev_get_drvdata(dev);
-
-	return sysfs_emit(buf, "%u\n", dshot->tx_clk_rate);
-}
-static DEVICE_ATTR_RO(tx_clock_hz);
-
-static ssize_t samples_per_bit_show(struct device *dev,
-				    struct device_attribute *attr, char *buf)
-{
-	struct rk_flexbus_dshot *dshot = dev_get_drvdata(dev);
-
-	return sysfs_emit(buf, "%u\n", dshot->samples_per_bit);
-}
-static DEVICE_ATTR_RO(samples_per_bit);
-
 static ssize_t telemetry_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct rk_flexbus_dshot *dshot = dev_get_drvdata(dev);
@@ -634,30 +604,9 @@ static ssize_t telemetry_store(struct device *dev, struct device_attribute *attr
 }
 static DEVICE_ATTR_RW(telemetry);
 
-static ssize_t last_value_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct rk_flexbus_dshot *dshot = dev_get_drvdata(dev);
-
-	return sysfs_emit(buf, "%u %u %u %u\n",
-			  dshot->last_value[0], dshot->last_value[1],
-			  dshot->last_value[2], dshot->last_value[3]);
-}
-static DEVICE_ATTR_RO(last_value);
-
-static ssize_t channels_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return sysfs_emit(buf, "%u\n", RK_DSHOT_CHANNELS);
-}
-static DEVICE_ATTR_RO(channels);
-
 static struct attribute *rk_dshot_attrs[] = {
 	&dev_attr_rate_hz.attr,
-	&dev_attr_actual_rate_hz.attr,
-	&dev_attr_tx_clock_hz.attr,
-	&dev_attr_samples_per_bit.attr,
 	&dev_attr_telemetry.attr,
-	&dev_attr_last_value.attr,
-	&dev_attr_channels.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(rk_dshot);
@@ -684,86 +633,6 @@ static int rk_dshot_broadcast(u16 value[RK_DSHOT_CHANNELS], u32 raw)
 		value[i] = raw;
 
 	return 0;
-}
-
-static int rk_dshot_parse_text(char *buf, u16 value[RK_DSHOT_CHANNELS])
-{
-	char *token;
-	u32 raw;
-	int ret;
-	int count = 0;
-
-	while ((token = strsep(&buf, " \t\n")) != NULL) {
-		if (!*token)
-			continue;
-
-		if (count >= RK_DSHOT_CHANNELS)
-			return -EINVAL;
-
-		ret = kstrtou32(token, 0, &raw);
-		if (ret)
-			return ret;
-		if (raw > 0x7ff)
-			return -EINVAL;
-
-		value[count++] = raw;
-	}
-
-	if (count == 1)
-		return rk_dshot_broadcast(value, value[0]);
-
-	return count == RK_DSHOT_CHANNELS ? 0 : -EINVAL;
-}
-
-static ssize_t rk_dshot_write(struct file *file, const char __user *buf,
-			      size_t count, loff_t *ppos)
-{
-	struct rk_flexbus_dshot *dshot = file->private_data;
-	u16 value[RK_DSHOT_CHANNELS];
-	char tmp[64];
-	int ret;
-
-	if (!count)
-		return 0;
-
-	if (count < sizeof(tmp)) {
-		if (copy_from_user(tmp, buf, count))
-			return -EFAULT;
-		tmp[count] = '\0';
-		ret = rk_dshot_parse_text(tmp, value);
-		if (!ret)
-			goto send;
-	}
-
-	if (count == sizeof(u16)) {
-		u16 raw;
-
-		if (copy_from_user(&raw, buf, sizeof(raw)))
-			return -EFAULT;
-		ret = rk_dshot_broadcast(value, raw);
-		if (ret)
-			return ret;
-	} else if (count == sizeof(u32)) {
-		u32 raw;
-
-		if (copy_from_user(&raw, buf, sizeof(raw)))
-			return -EFAULT;
-		ret = rk_dshot_broadcast(value, raw);
-		if (ret)
-			return ret;
-	} else if (count == sizeof(value)) {
-		if (copy_from_user(value, buf, sizeof(value)))
-			return -EFAULT;
-	} else {
-		return -EINVAL;
-	}
-
-send:
-	ret = rk_dshot_xmit(dshot, value);
-	if (ret)
-		return ret;
-
-	return count;
 }
 
 static long rk_dshot_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -851,7 +720,6 @@ static long rk_dshot_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 static const struct file_operations rk_dshot_fops = {
 	.owner = THIS_MODULE,
 	.open = rk_dshot_open,
-	.write = rk_dshot_write,
 	.unlocked_ioctl = rk_dshot_ioctl,
 	.llseek = no_llseek,
 };
@@ -895,11 +763,6 @@ static int rk_dshot_parse_polarity(struct device *dev, struct rk_flexbus_dshot *
 		return dev_err_probe(dev, -EINVAL,
 				     "invalid rockchip,dshot-polarity: %s\n", polarity);
 	}
-
-	if (device_property_read_bool(dev, "rockchip,normal-dshot"))
-		dshot->inverted = false;
-	if (device_property_read_bool(dev, "rockchip,inverted-dshot"))
-		dshot->inverted = true;
 
 	return 0;
 }
