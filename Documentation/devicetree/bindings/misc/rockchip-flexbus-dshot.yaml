@@ -15,6 +15,9 @@ description:
   encodes and transmits four synchronized DShot frames on flexbus0 data outputs.
   The driver uses a 4-bit Flexbus transfer width, with data bit 0 through bit 3
   mapped to DShot channel 0 through channel 3.
+  On boards that wire flexbus0 through isolation diodes into ESC signal lines
+  and connect those lines back to flexbus1, the same device can also expose a
+  raw sampled passthrough ioctl for ESC configuration tools.
 
 properties:
   compatible:
@@ -31,6 +34,13 @@ properties:
   rockchip,telemetry:
     description:
       Enable the telemetry request bit in transmitted DShot frames by default.
+    type: boolean
+
+  rockchip,passthrough-rx-reversed:
+    description:
+      The flexbus1 receive data bits are wired in reverse motor order. With this
+      set, DShot channel 0 is read from flexbus1 data bit 3, channel 1 from data
+      bit 2, channel 2 from data bit 1, and channel 3 from data bit 0.
     type: boolean
 
 required:

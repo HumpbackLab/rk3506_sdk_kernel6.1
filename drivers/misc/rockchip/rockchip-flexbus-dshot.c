@@ -35,16 +35,31 @@
 #define RK_DSHOT_MAX_TX_SAMPLES		(RK_DSHOT_FRAME_BITS * RK_DSHOT_MAX_SAMPLES_PER_BIT)
 #define RK_DSHOT_MAX_DMA_LEN		round_up(DIV_ROUND_UP(RK_DSHOT_MAX_TX_SAMPLES, 2), 0x40)
 #define RK_DSHOT_TIMEOUT_MS		100
+#define RK_DSHOT_PASSTHROUGH_MAX_SAMPLES	524288
+#define RK_DSHOT_PASSTHROUGH_MAX_DMA_LEN	\
+	round_up(DIV_ROUND_UP(RK_DSHOT_PASSTHROUGH_MAX_SAMPLES, 2), 0x40)
+#define RK_DSHOT_PASSTHROUGH_MIN_SAMPLE_RATE	100000
+#define RK_DSHOT_PASSTHROUGH_MAX_SAMPLE_RATE	10000000
+#define RK_DSHOT_PASSTHROUGH_DEFAULT_TIMEOUT_MS	100
 
 #define RK_DSHOT_IOCTL_BASE		'D'
 #define RK_DSHOT_IOC_SET_RATE		_IOW(RK_DSHOT_IOCTL_BASE, 0x00, __u32)
 #define RK_DSHOT_IOC_SET_TELEMETRY	_IOW(RK_DSHOT_IOCTL_BASE, 0x01, __u32)
 #define RK_DSHOT_IOC_SEND_CMD		_IOW(RK_DSHOT_IOCTL_BASE, 0x02, __u32)
 #define RK_DSHOT_IOC_SEND_FRAME		_IOW(RK_DSHOT_IOCTL_BASE, 0x03, struct rk_dshot_frame)
+#define RK_DSHOT_IOC_PASSTHROUGH_XFER	_IOWR(RK_DSHOT_IOCTL_BASE, 0x04, \
+					      struct rk_dshot_passthrough_xfer)
+
+#define RK_DSHOT_PASSTHROUGH_F_TX_INVERT	BIT(0)
+#define RK_DSHOT_PASSTHROUGH_F_RX_INVERT	BIT(1)
 
 #define RK_DSHOT_ERR_ISR		(FLEXBUS_DMA_TIMEOUT_ISR | FLEXBUS_DMA_ERR_ISR | \
 					 FLEXBUS_TX_UDF_ISR | FLEXBUS_TX_OVF_ISR)
 #define RK_DSHOT_ISR			(RK_DSHOT_ERR_ISR | FLEXBUS_TX_DONE_ISR)
+#define RK_DSHOT_PASSTHROUGH_ERR_ISR	(RK_DSHOT_ERR_ISR | FLEXBUS_RX_UDF_ISR | \
+					 FLEXBUS_RX_OVF_ISR)
+#define RK_DSHOT_PASSTHROUGH_ISR	(RK_DSHOT_PASSTHROUGH_ERR_ISR | \
+					 FLEXBUS_TX_DONE_ISR | FLEXBUS_RX_DONE_ISR)
 
 enum rk_dshot_result {
 	RK_DSHOT_DONE = 0,
@@ -53,6 +68,17 @@ enum rk_dshot_result {
 
 struct rk_dshot_frame {
 	__u16 value[RK_DSHOT_CHANNELS];
+};
+
+struct rk_dshot_passthrough_xfer {
+	__u64 tx_buf;
+	__u64 rx_buf;
+	__u32 tx_samples;
+	__u32 rx_samples;
+	__u32 sample_rate;
+	__u32 channel;
+	__u32 timeout_ms;
+	__u32 flags;
 };
 
 struct rk_flexbus_dshot {
@@ -64,16 +90,27 @@ struct rk_flexbus_dshot {
 	enum rk_dshot_result result;
 	u8 *tx_buf;
 	dma_addr_t tx_dma;
+	u8 *rx_buf;
+	dma_addr_t rx_dma;
 	u32 rate;
 	u32 actual_rate;
 	u32 tx_clk_rate;
 	u32 samples_per_bit;
 	u32 tx_samples;
 	u32 dma_len;
+	u32 passthrough_actual_sample_rate;
 	u16 last_value[RK_DSHOT_CHANNELS];
 	bool telemetry;
 	bool inverted;
+	bool passthrough_rx_reversed;
+	bool passthrough_active;
+	bool passthrough_wait_tx;
+	bool passthrough_wait_rx;
+	bool passthrough_tx_done;
+	bool passthrough_rx_done;
 };
+
+static int rk_dshot_hw_init(struct rk_flexbus_dshot *dshot);
 
 static u16 rk_dshot_make_frame(u16 value, bool telemetry, bool inverted)
 {
@@ -104,6 +141,16 @@ static void rk_dshot_set_sample(u8 *buf, unsigned int index, unsigned int channe
 		buf[index / 2] |= mask;
 	else
 		buf[index / 2] &= ~mask;
+}
+
+static bool rk_dshot_get_sample(const u8 *buf, unsigned int index, unsigned int channel)
+{
+	u8 sample = buf[index / 2];
+
+	if (index & 1)
+		sample >>= 4;
+
+	return sample & BIT(channel);
 }
 
 static void rk_dshot_encode(struct rk_flexbus_dshot *dshot, const u16 value[RK_DSHOT_CHANNELS])
@@ -186,6 +233,42 @@ static int rk_dshot_set_rate(struct rk_flexbus_dshot *dshot, u32 rate)
 	return 0;
 }
 
+static int rk_dshot_set_passthrough_sample_rate(struct rk_flexbus_dshot *dshot, u32 sample_rate)
+{
+	struct rockchip_flexbus *fb = dshot->fb;
+	unsigned long target = sample_rate * 2;
+	long tx_rate;
+	int ret;
+
+	if (sample_rate < RK_DSHOT_PASSTHROUGH_MIN_SAMPLE_RATE ||
+	    sample_rate > RK_DSHOT_PASSTHROUGH_MAX_SAMPLE_RATE)
+		return -EINVAL;
+
+	tx_rate = clk_round_rate(fb->clks[0].clk, target);
+	if (tx_rate <= 0)
+		return -EINVAL;
+
+	ret = clk_set_rate(fb->clks[0].clk, tx_rate);
+	if (ret)
+		return ret;
+
+	if (fb->num_clks > 1) {
+		long rx_rate = clk_round_rate(fb->clks[1].clk, target);
+
+		if (rx_rate <= 0)
+			return -EINVAL;
+
+		ret = clk_set_rate(fb->clks[1].clk, rx_rate);
+		if (ret)
+			return ret;
+	}
+
+	dshot->passthrough_actual_sample_rate =
+		clk_get_rate(fb->clks[fb->num_clks > 1 ? 1 : 0].clk) / 2;
+
+	return 0;
+}
+
 static int rk_dshot_xmit_buf_locked(struct rk_flexbus_dshot *dshot)
 {
 	struct rockchip_flexbus *fb = dshot->fb;
@@ -242,12 +325,208 @@ static int rk_dshot_xmit(struct rk_flexbus_dshot *dshot,
 	return ret;
 }
 
+static void rk_dshot_prepare_passthrough_locked(struct rk_flexbus_dshot *dshot,
+						bool wait_tx, bool wait_rx)
+{
+	reinit_completion(&dshot->completion);
+	dshot->result = RK_DSHOT_ERR;
+	dshot->passthrough_active = true;
+	dshot->passthrough_wait_tx = wait_tx;
+	dshot->passthrough_wait_rx = wait_rx;
+	dshot->passthrough_tx_done = !wait_tx;
+	dshot->passthrough_rx_done = !wait_rx;
+}
+
+static int rk_dshot_wait_passthrough_locked(struct rk_flexbus_dshot *dshot, u32 timeout_ms)
+{
+	unsigned long timeout = msecs_to_jiffies(timeout_ms);
+
+	if (!wait_for_completion_timeout(&dshot->completion, timeout))
+		return -ETIMEDOUT;
+	if (dshot->result != RK_DSHOT_DONE)
+		return -EIO;
+
+	return 0;
+}
+
+static void rk_dshot_finish_passthrough_locked(struct rk_flexbus_dshot *dshot)
+{
+	dshot->passthrough_active = false;
+	dshot->passthrough_wait_tx = false;
+	dshot->passthrough_wait_rx = false;
+}
+
+static void rk_dshot_pack_passthrough_tx(struct rk_flexbus_dshot *dshot,
+					 const u8 *samples, u32 sample_count,
+					 u32 channel, u32 dma_len, u32 flags)
+{
+	u32 i;
+
+	memset(dshot->tx_buf, 0x00, dma_len);
+
+	for (i = 0; i < sample_count; i++)
+		rk_dshot_set_sample(dshot->tx_buf, i, channel,
+				    (flags & RK_DSHOT_PASSTHROUGH_F_TX_INVERT) ?
+				    !samples[i] : !!samples[i]);
+}
+
+static void rk_dshot_unpack_passthrough_rx(struct rk_flexbus_dshot *dshot,
+					   u8 *samples, u32 sample_count, u32 channel,
+					   u32 flags)
+{
+	u32 rx_channel = dshot->passthrough_rx_reversed ?
+			(RK_DSHOT_CHANNELS - 1 - channel) : channel;
+	u32 i;
+
+	for (i = 0; i < sample_count; i++)
+		samples[i] = (rk_dshot_get_sample(dshot->rx_buf, i, rx_channel) ^
+			      !!(flags & RK_DSHOT_PASSTHROUGH_F_RX_INVERT)) ? 1 : 0;
+}
+
+static int rk_dshot_passthrough_xfer_locked(struct rk_flexbus_dshot *dshot,
+					    const struct rk_dshot_passthrough_xfer *xfer,
+					    const u8 *tx_samples, u8 *rx_samples)
+{
+	struct rockchip_flexbus *fb = dshot->fb;
+	u32 timeout_ms = xfer->timeout_ms ?: RK_DSHOT_PASSTHROUGH_DEFAULT_TIMEOUT_MS;
+	u32 tx_dma_len = round_up(DIV_ROUND_UP(xfer->tx_samples, 2), 0x40);
+	u32 rx_dma_len = round_up(DIV_ROUND_UP(xfer->rx_samples, 2), 0x40);
+	u32 tx_ctl = fb->dfs_reg->dfs_4bit | FLEXBUS_TX_CTL_MSB;
+	u32 rx_ctl = fb->dfs_reg->dfs_4bit | FLEXBUS_RX_CTL_MSB;
+	int ret;
+
+	if (xfer->channel >= RK_DSHOT_CHANNELS)
+		return -EINVAL;
+	if (!xfer->tx_samples && !xfer->rx_samples)
+		return -EINVAL;
+	if (xfer->tx_samples > RK_DSHOT_PASSTHROUGH_MAX_SAMPLES ||
+	    xfer->rx_samples > RK_DSHOT_PASSTHROUGH_MAX_SAMPLES)
+		return -EINVAL;
+	if (tx_dma_len > RK_DSHOT_PASSTHROUGH_MAX_DMA_LEN ||
+	    rx_dma_len > RK_DSHOT_PASSTHROUGH_MAX_DMA_LEN)
+		return -EINVAL;
+
+	ret = rk_dshot_set_passthrough_sample_rate(dshot, xfer->sample_rate);
+	if (ret) {
+		rk_dshot_hw_init(dshot);
+		return ret;
+	}
+
+	rockchip_flexbus_writel(fb, FLEXBUS_ICR, RK_DSHOT_PASSTHROUGH_ISR);
+	rockchip_flexbus_writel(fb, FLEXBUS_IMR, RK_DSHOT_PASSTHROUGH_ISR);
+	rockchip_flexbus_writel(fb, FLEXBUS_ENR, 0xffff0000);
+	rockchip_flexbus_writel(fb, FLEXBUS_FREE_SCLK, FLEXBUS_RX_FREE_MODE);
+	rockchip_flexbus_writel(fb, FLEXBUS_SLAVE_MODE, 0);
+	rockchip_flexbus_writel(fb, FLEXBUS_REMAP, 0);
+	rockchip_flexbus_writel(fb, FLEXBUS_TX_CTL, tx_ctl);
+	rockchip_flexbus_writel(fb, FLEXBUS_RX_CTL, rx_ctl);
+	fb->config->grf_config(fb, false, false, false);
+
+	if (xfer->tx_samples && xfer->rx_samples) {
+		rk_dshot_pack_passthrough_tx(dshot, tx_samples, xfer->tx_samples,
+					     xfer->channel, tx_dma_len, xfer->flags);
+		memset(dshot->rx_buf, 0, rx_dma_len);
+
+		rockchip_flexbus_writel(fb, FLEXBUS_COM_CTL, FLEXBUS_TX_AND_RX);
+		rockchip_flexbus_writel(fb, FLEXBUS_TX_NUM, xfer->tx_samples);
+		rockchip_flexbus_writel(fb, FLEXBUS_RX_NUM, xfer->rx_samples);
+		rockchip_flexbus_writel(fb, FLEXBUS_TXWAT_START, 16);
+		rockchip_flexbus_writel(fb, FLEXBUS_DMA_SRC_ADDR0, dshot->tx_dma >> 2);
+		rockchip_flexbus_writel(fb, FLEXBUS_DMA_DST_ADDR0, dshot->rx_dma >> 2);
+		rockchip_flexbus_writel(fb, FLEXBUS_DMA_SRC_LEN0, tx_dma_len);
+		rockchip_flexbus_writel(fb, FLEXBUS_DMA_DST_LEN0, rx_dma_len);
+		rk_dshot_prepare_passthrough_locked(dshot, true, true);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_RX_DIS | FLEXBUS_TX_DIS);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_RX_ENR | FLEXBUS_TX_ENR);
+
+		ret = rk_dshot_wait_passthrough_locked(dshot, timeout_ms);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_RX_DIS | FLEXBUS_TX_DIS);
+		rk_dshot_finish_passthrough_locked(dshot);
+		if (ret)
+			goto restore;
+
+		rk_dshot_unpack_passthrough_rx(dshot, rx_samples, xfer->rx_samples,
+					       xfer->channel, xfer->flags);
+		goto restore;
+	}
+
+	if (xfer->tx_samples) {
+		rk_dshot_pack_passthrough_tx(dshot, tx_samples, xfer->tx_samples,
+					     xfer->channel, tx_dma_len, xfer->flags);
+
+		rockchip_flexbus_writel(fb, FLEXBUS_COM_CTL, FLEXBUS_TX_ONLY);
+		rockchip_flexbus_writel(fb, FLEXBUS_TX_NUM, xfer->tx_samples);
+		rockchip_flexbus_writel(fb, FLEXBUS_TXWAT_START, 16);
+		rockchip_flexbus_writel(fb, FLEXBUS_DMA_SRC_ADDR0, dshot->tx_dma >> 2);
+		rockchip_flexbus_writel(fb, FLEXBUS_DMA_SRC_LEN0, tx_dma_len);
+		rk_dshot_prepare_passthrough_locked(dshot, true, false);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_TX_DIS);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_TX_ENR);
+
+		ret = rk_dshot_wait_passthrough_locked(dshot, timeout_ms);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_TX_DIS);
+		rk_dshot_finish_passthrough_locked(dshot);
+		if (ret)
+			goto restore;
+	}
+
+	if (xfer->rx_samples) {
+		memset(dshot->rx_buf, 0, rx_dma_len);
+
+		rockchip_flexbus_writel(fb, FLEXBUS_COM_CTL, FLEXBUS_RX_ONLY);
+		rockchip_flexbus_writel(fb, FLEXBUS_RX_NUM, xfer->rx_samples);
+		rockchip_flexbus_writel(fb, FLEXBUS_DMA_DST_ADDR0, dshot->rx_dma >> 2);
+		rockchip_flexbus_writel(fb, FLEXBUS_DMA_DST_LEN0, rx_dma_len);
+		rk_dshot_prepare_passthrough_locked(dshot, false, true);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_RX_DIS);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_RX_ENR);
+
+		ret = rk_dshot_wait_passthrough_locked(dshot, timeout_ms);
+		rockchip_flexbus_writel(fb, FLEXBUS_ENR, FLEXBUS_RX_DIS);
+		rk_dshot_finish_passthrough_locked(dshot);
+		if (ret)
+			goto restore;
+
+		rk_dshot_unpack_passthrough_rx(dshot, rx_samples, xfer->rx_samples,
+					       xfer->channel, xfer->flags);
+	}
+
+restore:
+	rockchip_flexbus_writel(fb, FLEXBUS_ENR, 0xffff0000);
+	rk_dshot_hw_init(dshot);
+
+	return ret;
+}
+
 static void rk_dshot_irq_handler(struct rockchip_flexbus *fb, u32 isr)
 {
 	struct rk_flexbus_dshot *dshot = fb->fb0_data;
 
 	if (fb->opmode0 != ROCKCHIP_FLEXBUS0_OPMODE_DSHOT || !dshot)
 		return;
+
+	if (dshot->passthrough_active) {
+		rockchip_flexbus_writel(fb, FLEXBUS_ICR, isr & RK_DSHOT_PASSTHROUGH_ISR);
+
+		if (isr & RK_DSHOT_PASSTHROUGH_ERR_ISR) {
+			rockchip_flexbus_writel(fb, FLEXBUS_ENR, 0xffff0000);
+			dshot->result = RK_DSHOT_ERR;
+			dev_err_ratelimited(dshot->dev, "passthrough error isr=0x%08x\n", isr);
+			complete(&dshot->completion);
+			return;
+		}
+
+		if (isr & FLEXBUS_TX_DONE_ISR)
+			dshot->passthrough_tx_done = true;
+		if (isr & FLEXBUS_RX_DONE_ISR)
+			dshot->passthrough_rx_done = true;
+
+		if (dshot->passthrough_tx_done && dshot->passthrough_rx_done) {
+			dshot->result = RK_DSHOT_DONE;
+			complete(&dshot->completion);
+		}
+		return;
+	}
 
 	rockchip_flexbus_writel(fb, FLEXBUS_ICR, isr & RK_DSHOT_ISR);
 
@@ -491,7 +770,10 @@ static long rk_dshot_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 {
 	struct rk_flexbus_dshot *dshot = file->private_data;
 	struct rk_dshot_frame frame;
+	struct rk_dshot_passthrough_xfer xfer;
 	u16 values[RK_DSHOT_CHANNELS];
+	u8 *tx_samples = NULL;
+	u8 *rx_samples = NULL;
 	u32 raw;
 	int ret;
 
@@ -522,6 +804,45 @@ static long rk_dshot_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 			return -EFAULT;
 		memcpy(values, frame.value, sizeof(values));
 		return rk_dshot_xmit(dshot, values);
+	case RK_DSHOT_IOC_PASSTHROUGH_XFER:
+		if (copy_from_user(&xfer, (void __user *)arg, sizeof(xfer)))
+			return -EFAULT;
+		if (xfer.flags & ~(RK_DSHOT_PASSTHROUGH_F_TX_INVERT |
+				   RK_DSHOT_PASSTHROUGH_F_RX_INVERT))
+			return -EINVAL;
+		if (xfer.channel >= RK_DSHOT_CHANNELS ||
+		    xfer.tx_samples > RK_DSHOT_PASSTHROUGH_MAX_SAMPLES ||
+		    xfer.rx_samples > RK_DSHOT_PASSTHROUGH_MAX_SAMPLES ||
+		    (!xfer.tx_samples && !xfer.rx_samples))
+			return -EINVAL;
+		if (xfer.tx_samples) {
+			tx_samples = memdup_user(u64_to_user_ptr(xfer.tx_buf), xfer.tx_samples);
+			if (IS_ERR(tx_samples))
+				return PTR_ERR(tx_samples);
+		}
+		if (xfer.rx_samples) {
+			rx_samples = kzalloc(xfer.rx_samples, GFP_KERNEL);
+			if (!rx_samples) {
+				kfree(tx_samples);
+				return -ENOMEM;
+			}
+		}
+
+		mutex_lock(&dshot->lock);
+		ret = rk_dshot_passthrough_xfer_locked(dshot, &xfer, tx_samples, rx_samples);
+		if (!ret)
+			xfer.sample_rate = dshot->passthrough_actual_sample_rate;
+		mutex_unlock(&dshot->lock);
+
+		if (!ret && xfer.rx_samples &&
+		    copy_to_user(u64_to_user_ptr(xfer.rx_buf), rx_samples, xfer.rx_samples))
+			ret = -EFAULT;
+		if (!ret && copy_to_user((void __user *)arg, &xfer, sizeof(xfer)))
+			ret = -EFAULT;
+
+		kfree(rx_samples);
+		kfree(tx_samples);
+		return ret;
 	default:
 		return -ENOTTY;
 	}
@@ -590,7 +911,8 @@ static int rk_dshot_probe(struct platform_device *pdev)
 	int ret;
 
 	if (fb->opmode0 != ROCKCHIP_FLEXBUS0_OPMODE_DSHOT ||
-	    fb->opmode1 != ROCKCHIP_FLEXBUS1_OPMODE_NULL) {
+	    (fb->opmode1 != ROCKCHIP_FLEXBUS1_OPMODE_NULL &&
+	     fb->opmode1 != ROCKCHIP_FLEXBUS1_OPMODE_ADC)) {
 		dev_err(&pdev->dev, "flexbus opmode mismatch, fb0=%u fb1=%u\n",
 			fb->opmode0, fb->opmode1);
 		return -ENODEV;
@@ -612,13 +934,23 @@ static int rk_dshot_probe(struct platform_device *pdev)
 
 	device_property_read_u32(&pdev->dev, "rockchip,dshot-rate", &dshot->rate);
 	dshot->telemetry = device_property_read_bool(&pdev->dev, "rockchip,telemetry");
+	dshot->passthrough_rx_reversed =
+		device_property_read_bool(&pdev->dev, "rockchip,passthrough-rx-reversed");
 	ret = rk_dshot_parse_polarity(&pdev->dev, dshot);
 	if (ret)
 		goto err_mutex;
 
-	dshot->tx_buf = dmam_alloc_coherent(dshot->dev, RK_DSHOT_MAX_DMA_LEN, &dshot->tx_dma,
+	dshot->tx_buf = dmam_alloc_coherent(dshot->dev, RK_DSHOT_PASSTHROUGH_MAX_DMA_LEN,
+					    &dshot->tx_dma,
 					    GFP_KERNEL | __GFP_ZERO);
 	if (!dshot->tx_buf) {
+		ret = -ENOMEM;
+		goto err_mutex;
+	}
+	dshot->rx_buf = dmam_alloc_coherent(dshot->dev, RK_DSHOT_PASSTHROUGH_MAX_DMA_LEN,
+					    &dshot->rx_dma,
+					    GFP_KERNEL | __GFP_ZERO);
+	if (!dshot->rx_buf) {
 		ret = -ENOMEM;
 		goto err_mutex;
 	}

@@ -28,4 +28,7 @@ config ROCKCHIP_FLEXBUS_DSHOT
 
 	  The driver exposes a misc character device. Writing a throttle value
 	  sends one DShot frame; ioctls can select the DShot bit rate, telemetry
-	  bit and raw 11-bit command value.
+	  bit and raw 11-bit command value. On boards that wire flexbus0 outputs
+	  back to flexbus1 inputs through the ESC signal lines, the misc device
+	  also supports a raw sampled passthrough ioctl for ESC configuration
+	  tools such as BLHeliSuite32 and AM32 configurators.

@@ -371,20 +371,24 @@
  * FlexBUS DShot — 4 通道同步输出
  * ch0..ch3 = flexbus0_d0..d3
  *
- * 注意: FlexBUS1_D0-D3 是 RX-only，不能用于 DShot 输出。
+ * passthrough RX 使用 flexbus1_d0..d3；powerfin 硬件接线为
+ * flexbus1_d0=m3, d1=m2, d2=m1, d3=m0。
  * ==================================================================== */
 &flexbus {
 	rockchip,flexbus0-opmode = <ROCKCHIP_FLEXBUS0_OPMODE_DSHOT>;
-	rockchip,flexbus1-opmode = <ROCKCHIP_FLEXBUS1_OPMODE_NULL>;
+	rockchip,flexbus1-opmode = <ROCKCHIP_FLEXBUS1_OPMODE_ADC>;
 	status = "okay";
 };
 
 &flexbus_dshot {
 	pinctrl-names = "default";
 	pinctrl-0 = <&flexbus0_d0_pins &flexbus0_d1_pins
-		     &flexbus0_d2_pins &flexbus0_d3_pins>;
+		     &flexbus0_d2_pins &flexbus0_d3_pins
+		     &flexbus1_d0_pins &flexbus1_d1_pins
+		     &flexbus1_d2_pins &flexbus1_d3_pins>;
 	rockchip,dshot-rate = <600000>;
 	rockchip,dshot-polarity = "invert";
+	rockchip,passthrough-rx-reversed;
 	status = "okay";
 };
 
