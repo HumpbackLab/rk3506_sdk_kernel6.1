@@ -31,7 +31,7 @@
 #define RK_DSHOT_MAX_SAMPLES_PER_BIT	128
 #define RK_DSHOT_FRAME_BITS		16
 #define RK_DSHOT_CHANNELS		4
-#define RK_DSHOT_DEFAULT_SAMPLES_PER_BIT	64
+#define RK_DSHOT_DEFAULT_SAMPLES_PER_BIT	32
 #define RK_DSHOT_MAX_TX_SAMPLES		(RK_DSHOT_FRAME_BITS * RK_DSHOT_MAX_SAMPLES_PER_BIT)
 #define RK_DSHOT_MAX_DMA_LEN		round_up(DIV_ROUND_UP(RK_DSHOT_MAX_TX_SAMPLES, 2), 0x40)
 #define RK_DSHOT_TIMEOUT_MS		100
@@ -133,6 +133,8 @@ static void rk_dshot_set_sample(u8 *buf, unsigned int index, unsigned int channe
 {
 	u8 mask = BIT(channel);
 
+	/* FLEXBUS_TX_CTL_MSB sends the eight nibbles in each DMA word in reverse order. */
+	index ^= 7;
 	if (index & 1)
 		mask <<= 4;
 
@@ -211,7 +213,10 @@ static int rk_dshot_set_rate(struct rk_flexbus_dshot *dshot, u32 rate)
 
 		actual_rate = DIV_ROUND_CLOSEST_ULL(rounded, samples * 2);
 		error = abs((int)actual_rate - (int)rate);
-		if (error < best_error || (error == best_error && samples > best_samples)) {
+		if (error < best_error ||
+		    (error == best_error &&
+		     abs((int)samples - RK_DSHOT_DEFAULT_SAMPLES_PER_BIT) <
+		     abs((int)best_samples - RK_DSHOT_DEFAULT_SAMPLES_PER_BIT))) {
 			best_error = error;
 			best_samples = samples;
 			best_clk_rate = rounded;
