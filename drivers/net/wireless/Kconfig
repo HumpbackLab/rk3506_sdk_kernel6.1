@@ -115,3 +115,5 @@ config VIRT_WIFI
 	  are wifi connections through a special rtnetlink device.
 
 endif # WLAN
+
+source "drivers/net/wireless/aic8800/Kconfig"

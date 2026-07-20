@@ -1,0 +1,8 @@
+AIC8800 USB driver imported from:
+https://github.com/radxa-pkg/aic8800
+
+Source commit: 6e076049b719ac2ff7ce5c92786a680407b11cdb
+Upstream release: 5.0+git20260123.5f7be68d-7
+
+PowerFin enables the firmware loader and fullmac driver as modules. Firmware
+for USB ID a69c:8d80 is installed by the Buildroot aic8800-firmware package.
