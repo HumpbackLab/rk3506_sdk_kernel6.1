@@ -95,6 +95,20 @@ config KMX61
 
 source "drivers/iio/imu/inv_icm42600/Kconfig"
 source "drivers/iio/imu/inv_mpu6050/Kconfig"
+
+config IIO_SC7U22
+	tristate "Silan SC7U22 six-axis IMU"
+	depends on SPI
+	select IIO_BUFFER
+	select IIO_KFIFO_BUF
+	help
+	  Say yes here to enable the Silan SC7U22 accelerometer and
+	  gyroscope. The driver uses the FIFO watermark interrupt and exposes
+	  synchronized six-axis samples through a single IIO buffer.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called sc7u22.
+
 source "drivers/iio/imu/st_lsm6dsr/Kconfig"
 source "drivers/iio/imu/st_lsm6dsx/Kconfig"
 source "drivers/iio/imu/st_lsm9ds0/Kconfig"

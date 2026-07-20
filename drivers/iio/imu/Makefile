@@ -25,6 +25,7 @@ obj-y += inv_icm42600/
 obj-y += inv_mpu6050/
 
 obj-$(CONFIG_KMX61) += kmx61.o
+obj-$(CONFIG_IIO_SC7U22) += sc7u22.o
 
 obj-y += st_lsm6dsr/
 obj-y += st_lsm6dsx/
