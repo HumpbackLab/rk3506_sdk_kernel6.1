@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * RK3506G PowerFin minimal initramfs boot configuration
+ */
+
+/dts-v1/;
+
+#include "rk3506-powerfin-spinor.dts"
+
+/ {
+	model = "RK3506G PowerFin RAM boot";
+
+	chosen {
+		bootargs = "earlycon=uart8250,mmio32,0xff0a0000 console=ttyFIQ0 rdinit=/init loglevel=7";
+	};
+};
