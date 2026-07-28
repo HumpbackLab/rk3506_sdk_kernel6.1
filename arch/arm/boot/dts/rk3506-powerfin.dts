@@ -395,6 +395,7 @@
 		     &flexbus1_d2_pins &flexbus1_d3_pins>;
 	rockchip,dshot-rate = <600000>;
 	rockchip,dshot-polarity = "invert";
+	rockchip,telemetry;
 	rockchip,passthrough-rx-reversed;
 	status = "okay";
 };

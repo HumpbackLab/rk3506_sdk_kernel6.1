@@ -4,7 +4,7 @@
 $id: http://devicetree.org/schemas/misc/rockchip-flexbus-dshot.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Rockchip Flexbus DShot protocol output
+title: Rockchip Flexbus bidirectional DShot protocol
 
 maintainers:
   - Rockchip Electronics Co., Ltd.
@@ -17,7 +17,10 @@ description:
   mapped to DShot channel 0 through channel 3.
   On boards that wire flexbus0 through isolation diodes into ESC signal lines
   and connect those lines back to flexbus1, the same device can also expose a
-  raw sampled passthrough ioctl for ESC configuration tools.
+  raw sampled passthrough ioctl for ESC configuration tools. In bidirectional
+  DShot mode flexbus1 samples all four ESC return lines in parallel. The driver
+  decodes the 21-bit GCR response, validates its checksum, and reports
+  electrical RPM through sysfs and ioctl.
 
 properties:
   compatible:
@@ -33,7 +36,10 @@ properties:
 
   rockchip,telemetry:
     description:
-      Enable the telemetry request bit in transmitted DShot frames by default.
+      Enable bidirectional telemetry by default. Each transmitted frame sets
+      the telemetry request bit and captures the replies on flexbus1. This
+      requires flexbus1 ADC opmode and board wiring from the ESC signal lines
+      to flexbus1 inputs.
     type: boolean
 
   rockchip,passthrough-rx-reversed:
@@ -56,11 +62,12 @@ examples:
         compatible = "rockchip,rk3506-flexbus";
         reg = <0xff880000 0x200>;
         rockchip,flexbus0-opmode = <ROCKCHIP_FLEXBUS0_OPMODE_DSHOT>;
-        rockchip,flexbus1-opmode = <ROCKCHIP_FLEXBUS1_OPMODE_NULL>;
+        rockchip,flexbus1-opmode = <ROCKCHIP_FLEXBUS1_OPMODE_ADC>;
 
         dshot {
             compatible = "rockchip,rk3506-flexbus-dshot";
             rockchip,dshot-rate = <600000>;
+            rockchip,telemetry;
         };
     };
 
