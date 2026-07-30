@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/pwm/rockchip,pwm-wave.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Userspace interface for a Rockchip PWM wave-table generator
+
+maintainers:
+  - Rockchip Linux <linux@rock-chips.com>
+
+description:
+  Exposes the lookup-table waveform generator in a Rockchip PWM v4 channel
+  through a character device. The waveform format, period and lookup-table
+  contents are runtime properties and are not represented in the device tree.
+
+properties:
+  compatible:
+    const: rockchip,pwm-wave
+
+  pwms:
+    maxItems: 1
+
+required:
+  - compatible
+  - pwms
+
+additionalProperties: false
+
+examples:
+  - |
+    pwm-wave {
+        compatible = "rockchip,pwm-wave";
+        pwms = <&pwm0 0 1250 0>;
+    };
+
+...

@@ -1,0 +1,2 @@
+adafruit-circuitpython-neopixel>=6.3.0,<7
+adafruit-circuitpython-pixelbuf>=2.0.0,<3

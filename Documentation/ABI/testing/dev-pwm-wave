@@ -1,0 +1,25 @@
+What:		/dev/pwm-wave-N
+Date:		July 2026
+KernelVersion:	6.1
+Contact:	Rockchip Linux <linux@rock-chips.com>
+Description:
+		A character-device interface to a Rockchip PWM v4 wave-table
+		generator.
+
+		PWM_WAVE_IOC_GET_CAPS reports the ABI version and lookup-table
+		capacities. PWM_WAVE_IOC_SET_CONFIG sets the fixed PWM period,
+		requested wave clock, per-entry repeat value and lookup-table
+		width.
+
+		A write submits one complete duty lookup table and starts the
+		wave generator from entry zero. The write buffer is an array of
+		native-endian __u32 duty durations in nanoseconds. Each duration
+		must not exceed the configured period. The complete array must
+		fit the selected 8-bit or 16-bit hardware table.
+
+		PWM_WAVE_IOC_STOP stops the output and leaves it at its inactive
+		polarity. Closing the descriptor does not stop a running wave.
+
+		Protocol interpretation belongs to userspace. For example,
+		WS2812 and SK6812 clients encode their bits and reset interval as
+		duty-duration entries before write().

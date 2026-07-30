@@ -92,6 +92,7 @@ enum rockchip_pwm_wave_update_mode {
  * @enable: enable or disable wave generator
  * @duty_en: to update duty by duty table or not
  * @period_en: to update period by period table or not
+ * @irq_en: enable wave middle and maximum interrupts
  * @clk_rate: the dclk rate in wave generator mode
  * @rpt: the number of repeated effective periods
  * @width_mode: the width mode of wave table
@@ -112,6 +113,7 @@ struct rockchip_pwm_wave_config {
 	bool enable;
 	bool duty_en;
 	bool period_en;
+	bool irq_en;
 	unsigned long clk_rate;
 	u16 rpt;
 	u32 width_mode;

@@ -123,6 +123,12 @@
 			linux,default-trigger = "heartbeat";
 		};
 	};
+
+	/* Userspace-programmable PWM wave output — GPIO0_A2 / RM_IO2 */
+	pwm_wave: pwm-wave {
+		compatible = "rockchip,pwm-wave";
+		pwms = <&pwm0_4ch_0 0 1250 0>;
+	};
 };
 
 /* ====================================================================
@@ -140,6 +146,13 @@
 /* UART0 pin mux — 参考 Luckfox Lyra, pinctrl 由 fiq-debugger 自行处理 */
 &uart0 {
 	status = "disabled";
+};
+
+&pwm0_4ch_0 {
+	/delete-property/ pinctrl-1;
+	pinctrl-names = "active";
+	pinctrl-0 = <&rm_io2_pwm0_ch0>;
+	status = "okay";
 };
 
 /* ====================================================================

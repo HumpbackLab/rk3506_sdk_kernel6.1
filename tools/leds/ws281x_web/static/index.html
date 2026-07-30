@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PowerFin 灯光控制</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, "Noto Sans SC", system-ui, sans-serif;
+      background: #090b10;
+      color: #edf0f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 15% 20%, #29356d55, transparent 34%),
+        radial-gradient(circle at 85% 80%, #6e243f44, transparent 36%),
+        #090b10;
+    }
+    main {
+      width: min(880px, 100%);
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      overflow: hidden;
+      border: 1px solid #ffffff18;
+      border-radius: 24px;
+      background: #11141dcc;
+      box-shadow: 0 32px 90px #0009;
+      backdrop-filter: blur(18px);
+    }
+    .preview {
+      min-height: 540px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 36px;
+      background: linear-gradient(145deg, #151a28, #0c0e15);
+    }
+    h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); letter-spacing: -.04em; }
+    .eyebrow { color: #8992aa; font-size: 12px; letter-spacing: .18em; text-transform: uppercase; }
+    .strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-content: center;
+      min-height: 230px;
+    }
+    .pixel {
+      width: 34px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: var(--pixel, #ff4000);
+      box-shadow: 0 0 12px var(--pixel), 0 0 35px color-mix(in srgb, var(--pixel), transparent 45%);
+      transition: opacity .15s;
+    }
+    .status { color: #8992aa; font-size: 13px; }
+    .status::before {
+      content: "";
+      display: inline-block;
+      width: 8px; height: 8px;
+      margin-right: 8px;
+      border-radius: 50%;
+      background: #50e49b;
+      box-shadow: 0 0 12px #50e49b;
+    }
+    form { padding: 34px; display: grid; gap: 20px; }
+    .field { display: grid; gap: 8px; }
+    label { color: #aab1c2; font-size: 13px; }
+    select, input[type="number"] {
+      width: 100%;
+      border: 1px solid #ffffff16;
+      border-radius: 10px;
+      padding: 11px 12px;
+      background: #090b12;
+      color: inherit;
+      outline: none;
+    }
+    input[type="range"] { width: 100%; accent-color: #ff4778; }
+    input[type="color"] {
+      width: 100%; height: 48px;
+      padding: 4px;
+      border: 1px solid #ffffff16;
+      border-radius: 10px;
+      background: #090b12;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    output { float: right; color: #edf0f7; }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 13px;
+      background: linear-gradient(135deg, #ff4778, #7958ff);
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 10px 30px #b0448740;
+    }
+    #message { min-height: 18px; color: #ff8ca9; font-size: 12px; }
+    @media (max-width: 720px) {
+      main { grid-template-columns: 1fr; }
+      .preview { min-height: 370px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="preview">
+      <div>
+        <div class="eyebrow">PowerFin · PWM LUT</div>
+        <h1>灯光实验室</h1>
+      </div>
+      <div class="strip" id="strip"></div>
+      <div class="status" id="status">正在连接控制器</div>
+    </section>
+
+    <form id="controls">
+      <div class="row">
+        <div class="field">
+          <label for="protocol">灯珠协议</label>
+          <select id="protocol">
+            <option value="ws2812">WS2812 RGB</option>
+            <option value="sk6812-rgb">SK6812 RGB</option>
+            <option value="sk6812-rgbw">SK6812 RGBW</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="count">灯珠数量</label>
+          <input id="count" type="number" min="1" max="29" value="1">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="order">线序</label>
+          <select id="order"></select>
+        </div>
+        <div class="field">
+          <label for="effect">显示效果</label>
+          <select id="effect">
+            <option value="solid">常亮</option>
+            <option value="rainbow">彩虹</option>
+            <option value="chase">追逐</option>
+            <option value="breathe">呼吸</option>
+            <option value="off">关闭</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="color">主颜色</label>
+        <input id="color" type="color" value="#ff4000">
+      </div>
+
+      <div class="field">
+        <label for="brightness">亮度 <output id="brightnessValue">25%</output></label>
+        <input id="brightness" type="range" min="0" max="1" step="0.01" value=".25">
+      </div>
+
+      <div class="field">
+        <label for="speed">速度 <output id="speedValue">1.0×</output></label>
+        <input id="speed" type="range" min=".05" max="5" step=".05" value="1">
+      </div>
+
+      <button type="submit">应用设置</button>
+      <div id="message"></div>
+    </form>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const rgbOrders = ["GRB", "RGB", "RBG", "GBR", "BRG", "BGR"];
+    const rgbwOrders = ["GRBW", "RGBW", "GBRW", "BRGW", "WRGB", "WGRB"];
+    let state = {};
+
+    function rebuildOrders(selected) {
+      const orders = $("protocol").value === "sk6812-rgbw" ? rgbwOrders : rgbOrders;
+      $("order").replaceChildren(...orders.map(order => {
+        const option = new Option(order, order);
+        option.selected = order === selected;
+        return option;
+      }));
+      $("count").max = $("protocol").value === "sk6812-rgbw" ? 22 : 29;
+    }
+
+    function renderPreview() {
+      const count = Math.min(Number($("count").value), 40);
+      const color = $("effect").value === "off" ? "#171a22" : $("color").value;
+      $("strip").replaceChildren(...Array.from({length: count}, (_, index) => {
+        const pixel = document.createElement("span");
+        pixel.className = "pixel";
+        pixel.style.setProperty("--pixel", color);
+        if ($("effect").value === "chase") pixel.style.opacity = index < 4 ? 1 : .15;
+        if ($("effect").value === "rainbow")
+          pixel.style.setProperty("--pixel", `hsl(${index * 360 / count} 90% 60%)`);
+        return pixel;
+      }));
+    }
+
+    function loadState(next) {
+      state = next;
+      for (const key of ["protocol", "count", "effect", "color", "brightness", "speed"])
+        $(key).value = next[key];
+      rebuildOrders(next.order);
+      $("brightnessValue").value = `${Math.round(next.brightness * 100)}%`;
+      $("speedValue").value = `${Number(next.speed).toFixed(1)}×`;
+      $("status").textContent = `${next.device} · ${next.count} pixels`;
+      renderPreview();
+    }
+
+    async function request(changes) {
+      const response = await fetch("/api/state", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(changes)
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "请求失败");
+      return body;
+    }
+
+    $("protocol").addEventListener("change", () => {
+      rebuildOrders($("protocol").value === "sk6812-rgbw" ? "GRBW" : "GRB");
+      renderPreview();
+    });
+    for (const id of ["count", "effect", "color"]) $(id).addEventListener("input", renderPreview);
+    $("brightness").addEventListener("input", event => {
+      $("brightnessValue").value = `${Math.round(event.target.value * 100)}%`;
+    });
+    $("speed").addEventListener("input", event => {
+      $("speedValue").value = `${Number(event.target.value).toFixed(1)}×`;
+    });
+
+    $("controls").addEventListener("submit", async event => {
+      event.preventDefault();
+      $("message").textContent = "正在应用…";
+      try {
+        const next = await request({
+          protocol: $("protocol").value,
+          count: Number($("count").value),
+          order: $("order").value,
+          effect: $("effect").value,
+          color: $("color").value,
+          brightness: Number($("brightness").value),
+          speed: Number($("speed").value)
+        });
+        loadState(next);
+        $("message").textContent = "";
+      } catch (error) {
+        $("message").textContent = error.message;
+      }
+    });
+
+    fetch("/api/state")
+      .then(response => response.json())
+      .then(loadState)
+      .catch(error => $("message").textContent = error.message);
+  </script>
+</body>
+</html>

@@ -642,6 +642,7 @@ static ssize_t pwm_rockchip_test_write(struct file *file, const char __user *buf
 		wave_config.enable = enable;
 		wave_config.duty_en = true;
 		wave_config.period_en = false;
+		wave_config.irq_en = true;
 		wave_config.width_mode = PWM_WIDTH_MODE;
 		wave_config.update_mode = PWM_WAVE_INCREASING_THEN_DECREASING;
 		wave_config.duty_max = (channel_id % 3 + 1) * PWM_TABLE_MAX - 1;

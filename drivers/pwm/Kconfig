@@ -492,6 +492,18 @@ config PWM_ROCKCHIP
 	  Generic PWM framework driver for the PWM controller found on
 	  Rockchip SoCs.
 
+config PWM_ROCKCHIP_WAVE_CHAR
+	tristate "Rockchip PWM wave-table userspace interface"
+	depends on PWM_ROCKCHIP
+	help
+	  Expose the lookup-table waveform generator available in Rockchip
+	  PWM v4 controllers through a character device. Userspace configures
+	  the fixed period and submits arrays of duty durations in
+	  nanoseconds. Protocol-specific encoding remains in userspace.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called pwm-wave-rockchip.
+
 config PWM_ROCKCHIP_ONESHOT
 	bool "Rockchip PWM oneshot mode support"
 	depends on PWM_ROCKCHIP && NO_GKI
