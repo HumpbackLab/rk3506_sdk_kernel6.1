@@ -10,9 +10,11 @@
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
+#include <linux/sched.h>
 #include <linux/spi/spi.h>
 #include <linux/workqueue.h>
 #include <asm/unaligned.h>
+#include <uapi/linux/sched/types.h>
 
 #include <linux/iio/buffer.h>
 #include <linux/iio/iio.h>
@@ -70,6 +72,7 @@
 #define SC7U22_MAX_DRAIN_LOOPS		16
 #define SC7U22_WATCHDOG_MS		10
 #define SC7U22_REINIT_ERROR_LIMIT	3
+#define SC7U22_IRQ_PRIORITY		98
 
 enum sc7u22_scan_index {
 	SC7U22_SCAN_ACCEL_X,
@@ -123,6 +126,7 @@ struct sc7u22_data {
 	unsigned int max_burst_frames;
 	unsigned int consecutive_errors;
 	bool buffer_enabled;
+	bool irq_priority_set;
 };
 
 static void sc7u22_update_max(atomic64_t *value, s64 sample)
@@ -493,10 +497,24 @@ static irqreturn_t sc7u22_irq_thread(int irq, void *private)
 {
 	struct iio_dev *indio_dev = private;
 	struct sc7u22_data *st = iio_priv(indio_dev);
+	struct sched_attr attr = {
+		.sched_policy = SCHED_FIFO,
+		.sched_priority = SC7U22_IRQ_PRIORITY,
+	};
 	s64 irq_ts = READ_ONCE(st->wtm_irq_ts_ns);
 	s64 start = iio_get_time_ns(indio_dev);
 	s64 latency = start - irq_ts;
 	s64 duration;
+	int ret;
+
+	if (!st->irq_priority_set) {
+		ret = sched_setattr_nocheck(current, &attr);
+		if (ret)
+			dev_warn(&st->spi->dev,
+				 "failed to set IRQ thread priority to %d: %d\n",
+				 SC7U22_IRQ_PRIORITY, ret);
+		st->irq_priority_set = true;
+	}
 
 	atomic64_add(latency, &st->stats.irq_latency_total_ns);
 	sc7u22_update_min(&st->stats.irq_latency_min_ns, latency);
@@ -828,8 +846,9 @@ static int sc7u22_probe(struct spi_device *spi)
 		return dev_err_probe(&spi->dev, ret, "failed to register IIO device\n");
 
 	spi_set_drvdata(spi, indio_dev);
-	dev_info(&spi->dev, "SC7U22 IIO IMU at %u Hz SPI, IRQ %d\n",
-		 spi->max_speed_hz, spi->irq);
+	dev_info(&spi->dev,
+		 "SC7U22 IIO IMU at %u Hz SPI, IRQ %d, FIFO priority %d\n",
+		 spi->max_speed_hz, spi->irq, SC7U22_IRQ_PRIORITY);
 	return 0;
 }
 
