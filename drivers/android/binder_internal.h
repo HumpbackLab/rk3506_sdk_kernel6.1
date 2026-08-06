@@ -489,6 +489,12 @@ struct binder_thread {
 	struct binder_stats stats;
 	atomic_t tmp_ref;
 	bool is_dead;
+#ifdef CONFIG_ACCESS_TOKENID
+	struct access_token tokens;
+#endif
+#ifdef CONFIG_BINDER_SENDER_INFO
+	__u64 sender_pid_nr;
+#endif
 };
 
 /**
@@ -536,6 +542,10 @@ struct binder_transaction {
 	 * during thread teardown
 	 */
 	spinlock_t lock;
+#ifdef CONFIG_ACCESS_TOKENID
+	u64 sender_tokenid;
+	u64 first_tokenid;
+#endif
 };
 
 /**

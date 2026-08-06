@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0
+config ACCESS_TOKENID
+	bool "Access task's token"
+	default n
+	help
+	  Provide the OpenHarmony access-token misc device and per-task token
+	  storage used to propagate caller identity through Binder transactions.

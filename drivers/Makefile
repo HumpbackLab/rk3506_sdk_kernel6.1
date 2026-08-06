@@ -189,6 +189,7 @@ obj-$(CONFIG_COUNTER)		+= counter/
 obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
+obj-$(CONFIG_ACCESS_TOKENID)	+= accesstokenid/
 obj-$(CONFIG_RK_FLASH)		+= rkflash/
 obj-$(CONFIG_RK_HEADSET)	+= headset_observe/
 obj-$(CONFIG_RK_NAND)		+= rk_nand/

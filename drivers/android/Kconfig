@@ -47,4 +47,12 @@ config ANDROID_BINDER_IPC_SELFTEST
 	  exhaustively with combinations of various buffer sizes and
 	  alignments.
 
+config BINDER_SENDER_INFO
+	bool "Get binder sender info"
+	depends on ANDROID_BINDER_IPC
+	default y
+	help
+	  Expose the OpenHarmony Binder ioctl that reports the real sender PID
+	  and access-token identity for the current transaction.
+
 endmenu
