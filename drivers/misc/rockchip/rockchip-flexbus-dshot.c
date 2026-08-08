@@ -38,7 +38,8 @@
 #define RK_DSHOT_TELEMETRY_OVERSAMPLE	3
 #define RK_DSHOT_TELEMETRY_RATE_NUM	5
 #define RK_DSHOT_TELEMETRY_RATE_DEN	4
-#define RK_DSHOT_TELEMETRY_CAPTURE_US	120
+#define RK_DSHOT_TELEMETRY_MIN_CAPTURE_US	120
+#define RK_DSHOT_TELEMETRY_TURNAROUND_US	40
 #define RK_DSHOT_TELEMETRY_BITS		21
 #define RK_DSHOT_TELEMETRY_SCAN_BITS	23
 #define RK_DSHOT_PASSTHROUGH_MAX_SAMPLES	524288
@@ -326,9 +327,14 @@ static int rk_dshot_set_rate(struct rk_flexbus_dshot *dshot, u32 rate)
 	u32 best_samples = RK_DSHOT_DEFAULT_SAMPLES_PER_BIT;
 	u32 best_clk_rate = rate * best_samples * 2;
 	u64 capture_samples;
+	u64 min_capture_samples;
+	u64 reply_samples;
+	u64 turnaround_samples;
+	u64 tx_capture_samples;
 	unsigned long rx_target;
 	long rx_clk_rate;
 	u32 best_error = U32_MAX;
+	u32 telemetry_bit_rate;
 	u32 samples;
 	int ret;
 
@@ -375,15 +381,36 @@ static int rk_dshot_set_rate(struct rk_flexbus_dshot *dshot, u32 rate)
 	rk_dshot_update_timing(dshot, rate, clk_get_rate(dshot->fb->clks[0].clk),
 			       best_samples);
 	dshot->rx_sample_rate = clk_get_rate(dshot->fb->clks[1].clk) / 2;
-	capture_samples = (u64)dshot->rx_sample_rate * RK_DSHOT_TELEMETRY_CAPTURE_US;
-	dshot->telemetry_rx_samples = DIV_ROUND_UP_ULL(capture_samples, USEC_PER_SEC);
+	telemetry_bit_rate = DIV_ROUND_CLOSEST_ULL((u64)dshot->actual_rate *
+						    RK_DSHOT_TELEMETRY_RATE_NUM,
+						    RK_DSHOT_TELEMETRY_RATE_DEN);
+
+	/*
+	 * RX starts together with TX, so the capture must cover the outgoing
+	 * frame, ESC turnaround and the complete telemetry scan window.
+	 */
+	tx_capture_samples = DIV_ROUND_UP_ULL((u64)dshot->tx_samples *
+					       dshot->rx_sample_rate,
+					       dshot->tx_clk_rate / 2);
+	turnaround_samples = DIV_ROUND_UP_ULL((u64)dshot->rx_sample_rate *
+					       RK_DSHOT_TELEMETRY_TURNAROUND_US,
+					       USEC_PER_SEC);
+	reply_samples = DIV_ROUND_UP_ULL((u64)RK_DSHOT_TELEMETRY_SCAN_BITS *
+					  dshot->rx_sample_rate,
+					  telemetry_bit_rate);
+	min_capture_samples = DIV_ROUND_UP_ULL((u64)dshot->rx_sample_rate *
+						RK_DSHOT_TELEMETRY_MIN_CAPTURE_US,
+						USEC_PER_SEC);
+	capture_samples = tx_capture_samples + turnaround_samples + reply_samples;
+	dshot->telemetry_rx_samples = max(capture_samples, min_capture_samples);
 	dshot->telemetry_dma_len =
 		round_up(DIV_ROUND_UP(dshot->telemetry_rx_samples, 2), 0x40);
 
 	dev_dbg(dshot->dev,
-		"rate=%u actual=%u tx_clk=%u samples_per_bit=%u rx_sample_rate=%u error=%d\n",
+		"rate=%u actual=%u tx_clk=%u samples_per_bit=%u rx_sample_rate=%u capture_samples=%u error=%d\n",
 		dshot->rate, dshot->actual_rate, dshot->tx_clk_rate,
 		dshot->samples_per_bit, dshot->rx_sample_rate,
+		dshot->telemetry_rx_samples,
 		(int)dshot->actual_rate - (int)dshot->rate);
 
 	return 0;
