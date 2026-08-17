@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * RK3506G PowerFin recovery initramfs on CPU0/CPU1 with Betaflight on CPU2.
+ */
+
+/dts-v1/;
+
+#include "rk3506-powerfin-ramboot.dts"
+#include "rk3506-amp.dtsi"
+#include "rk3506-powerfin-betaflight-amp.dtsi"
+
+/ {
+	model = "RK3506G PowerFin RAM boot Betaflight AMP";
+};

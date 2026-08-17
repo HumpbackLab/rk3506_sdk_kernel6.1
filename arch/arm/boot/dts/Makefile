@@ -1240,7 +1240,9 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3506g-test1-v10-audio.dtb \
 	rk3506-powerfin.dtb \
 	rk3506-powerfin-spinor.dtb \
-	rk3506-powerfin-ramboot.dtb
+	rk3506-powerfin-spinor-amp.dtb \
+	rk3506-powerfin-ramboot.dtb \
+	rk3506-powerfin-ramboot-amp.dtb
 dtb-$(CONFIG_ARCH_S3C24XX) += \
 	s3c2416-smdk2416.dtb
 dtb-$(CONFIG_ARCH_S3C64XX) += \

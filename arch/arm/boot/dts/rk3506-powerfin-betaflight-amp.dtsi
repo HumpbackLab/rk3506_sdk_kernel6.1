@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * PowerFin resources owned by bare-metal Betaflight on CPU2.
+ */
+
+/ {
+	/delete-node/ rpmsg@3c00000;
+};
+
+&reserved_memory {
+	/delete-node/ amp-shmem@3b00000;
+	/delete-node/ rpmsg@3c00000;
+	/delete-node/ rpmsg-dma@3d00000;
+
+	/* Betaflight's linker-defined shared-memory window. */
+	amp_bf_shmem_reserved: amp-shmem@2d00000 {
+		reg = <0x02d00000 0x00100000>;
+		no-map;
+	};
+
+	/* CPU2 Betaflight image and private runtime memory. */
+	amp_reserved: amp@2e00000 {
+		reg = <0x02e00000 0x00100000>;
+		no-map;
+	};
+};
+
+/*
+ * All three Cortex-A7 cores share ARMCLK, while Linux only accounts for the
+ * load on CPU0/CPU1.  Keep the AMP cluster at the RK3506 1008 MHz OPP so
+ * Linux DVFS cannot change the execution rate of bare-metal CPU2.
+ */
+&cpu0_opp_table {
+	/delete-node/ opp-600000000;
+	/delete-node/ opp-800000000;
+	/delete-node/ opp-1200000000;
+	/delete-node/ opp-1296000000;
+	/delete-node/ opp-1416000000;
+	/delete-node/ opp-1512000000;
+};
+
+/* Keep every BF-owned peripheral clock running after Linux disables its node. */
+&rockchip_amp {
+	clocks = <&cru SCLK_UART1>, <&cru PCLK_UART1>,
+		 <&cru SCLK_UART2>, <&cru PCLK_UART2>,
+		 <&cru SCLK_UART3>, <&cru PCLK_UART3>,
+		 <&cru SCLK_UART4>, <&cru PCLK_UART4>,
+		 <&cru SCLK_UART5>, <&cru PCLK_UART5>,
+		 <&cru CLK_I2C0>, <&cru PCLK_I2C0>,
+		 <&cru CLK_I2C1>, <&cru PCLK_I2C1>,
+		 <&cru CLK_I2C2>, <&cru PCLK_I2C2>,
+		 <&cru PCLK_TIMER>, <&cru CLK_TIMER0_CH5>,
+		 <&cru CLK_SPI0>, <&cru PCLK_SPI0>,
+		 <&cru CLK_SPI1>, <&cru PCLK_SPI1>,
+		 <&cru PCLK_GPIO0>, <&cru DBCLK_GPIO0>,
+		 <&cru ACLK_DMAC0>, <&cru ACLK_DMAC1>,
+		 <&cru CLK_FLEXBUS_TX>, <&cru CLK_FLEXBUS_RX>,
+		 <&cru ACLK_FLEXBUS>, <&cru HCLK_FLEXBUS>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart4_rm_pins>;
+	amp-irqs = /bits/ 64 <
+		GIC_AMP_IRQ_CFG_ROUTE(32, 0xc0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(33, 0xc0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(34, 0xc0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(35, 0xc0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(67, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(68, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(69, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(70, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(71, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(72, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(73, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(74, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(75, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(76, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(148, 0xb0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(149, 0xa0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(150, 0xb0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(151, 0xa0, CPU_GET_AFFINITY(0, 2))>;
+};
+
+/* CPU2-owned peripherals: never bind a Linux driver to these registers. */
+&uart1 {
+	status = "disabled";
+};
+
+&uart2 {
+	status = "disabled";
+};
+
+&uart3 {
+	status = "disabled";
+};
+
+&uart4 {
+	status = "disabled";
+};
+
+&uart5 {
+	status = "disabled";
+};
+
+&i2c0 {
+	status = "disabled";
+};
+
+&i2c1 {
+	status = "disabled";
+};
+
+&i2c2 {
+	status = "disabled";
+};
+
+&spi0 {
+	status = "disabled";
+};
+
+&spi1 {
+	status = "disabled";
+};
+
+&dmac0 {
+	status = "disabled";
+};
+
+&dmac1 {
+	status = "disabled";
+};
+
+&saradc {
+	status = "disabled";
+};
+
+&flexbus_dshot {
+	status = "disabled";
+};
+
+&flexbus {
+	status = "disabled";
+};
