@@ -10,17 +10,13 @@ maintainers:
   - Rockchip Electronics Co., Ltd.
 
 description:
-  The Rockchip Flexbus controller can generate one-bit sampled waveforms through
-  its transmit channel. This binding describes a Flexbus child device that
-  encodes and transmits four synchronized DShot frames on flexbus0 data outputs.
-  The driver uses a 4-bit Flexbus transfer width, with data bit 0 through bit 3
-  mapped to DShot channel 0 through channel 3.
-  On boards that wire flexbus0 through isolation diodes into ESC signal lines
-  and connect those lines back to flexbus1, the same device can also expose a
-  raw sampled passthrough ioctl for ESC configuration tools. In bidirectional
-  DShot mode flexbus1 samples all four ESC return lines in parallel. The driver
-  decodes the 21-bit GCR response, validates its checksum, and reports
-  electrical RPM through sysfs and ioctl.
+  The Rockchip Flexbus controller can generate one-bit sampled waveforms and
+  switch its flexbus0 data pads from output to input. This binding describes a
+  Flexbus child device that transmits four synchronized DShot frames and then
+  captures the ESC replies on the same flexbus0 data lines. The driver uses a
+  4-bit Flexbus transfer width, with data bit 0 through bit 3 mapped to DShot
+  channel 0 through channel 3. It decodes the 21-bit GCR response, validates
+  its checksum, and reports electrical RPM through sysfs and ioctl.
 
 properties:
   compatible:
@@ -37,16 +33,8 @@ properties:
   rockchip,telemetry:
     description:
       Enable bidirectional telemetry by default. Each transmitted frame sets
-      the telemetry request bit and captures the replies on flexbus1. This
-      requires flexbus1 ADC opmode and board wiring from the ESC signal lines
-      to flexbus1 inputs.
-    type: boolean
-
-  rockchip,passthrough-rx-reversed:
-    description:
-      The flexbus1 receive data bits are wired in reverse motor order. With this
-      set, DShot channel 0 is read from flexbus1 data bit 3, channel 1 from data
-      bit 2, channel 2 from data bit 1, and channel 3 from data bit 0.
+      the telemetry request bit and captures the replies after flexbus0 changes
+      from transmit to receive mode.
     type: boolean
 
 required:
@@ -62,7 +50,7 @@ examples:
         compatible = "rockchip,rk3506-flexbus";
         reg = <0xff880000 0x200>;
         rockchip,flexbus0-opmode = <ROCKCHIP_FLEXBUS0_OPMODE_DSHOT>;
-        rockchip,flexbus1-opmode = <ROCKCHIP_FLEXBUS1_OPMODE_ADC>;
+        rockchip,flexbus1-opmode = <ROCKCHIP_FLEXBUS1_OPMODE_NULL>;
 
         dshot {
             compatible = "rockchip,rk3506-flexbus-dshot";
