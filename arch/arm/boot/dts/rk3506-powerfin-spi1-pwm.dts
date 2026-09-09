@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * PowerFin feature overlay: release SPI1 and route its three RMIO signals to
+ * PWM1 channels 3-5. The GPIO chip-select pins remain available as GPIOs.
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/clock/rockchip,rk3506-cru.h>
+
+&spi1 {
+	status = "disabled";
+};
+
+&pwm1_8ch_3 {
+	status = "okay";
+	pinctrl-names = "active";
+	pinctrl-0 = <&rm_io9_pwm1_ch3>;
+	assigned-clocks = <&cru CLK_PWM1>;
+	assigned-clock-rates = <100000000>;
+};
+
+&pwm1_8ch_4 {
+	status = "okay";
+	pinctrl-names = "active";
+	pinctrl-0 = <&rm_io8_pwm1_ch4>;
+	assigned-clocks = <&cru CLK_PWM1>;
+	assigned-clock-rates = <100000000>;
+};
+
+&pwm1_8ch_5 {
+	status = "okay";
+	pinctrl-names = "active";
+	pinctrl-0 = <&rm_io7_pwm1_ch5>;
+	assigned-clocks = <&cru CLK_PWM1>;
+	assigned-clock-rates = <100000000>;
+};
+
+&{/chosen} {
+	powerfin,spi1-mode = "pwm";
+};

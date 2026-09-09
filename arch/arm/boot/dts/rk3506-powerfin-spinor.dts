@@ -12,6 +12,30 @@
 / {
 	model = "RK3506G PowerFin SPI NOR";
 
+	/*
+	 * Minimal symbol table for the PowerFin FIT overlays.  Building this DTB
+	 * with DTC -@ retains every labelled disabled node in the vendor tree and
+	 * makes the DTB too large for the RK3506 boot memory layout.
+	 */
+	__symbols__ {
+		cru = "/clock-controller@ff9a0000";
+		flexbus = "/flexbus@ff880000";
+		flexbus_dshot = "/flexbus@ff880000/dshot";
+		pwm1_8ch_0 = "/pwm@ff170000";
+		pwm1_8ch_1 = "/pwm@ff171000";
+		pwm1_8ch_2 = "/pwm@ff172000";
+		pwm1_8ch_3 = "/pwm@ff173000";
+		pwm1_8ch_4 = "/pwm@ff174000";
+		pwm1_8ch_5 = "/pwm@ff175000";
+		rm_io31_pwm1_ch0 = "/pinctrl/rm_io31/rm-io31-pwm1-ch0";
+		rm_io30_pwm1_ch1 = "/pinctrl/rm_io30/rm-io30-pwm1-ch1";
+		rm_io29_pwm1_ch2 = "/pinctrl/rm_io29/rm-io29-pwm1-ch2";
+		rm_io9_pwm1_ch3 = "/pinctrl/rm_io9/rm-io9-pwm1-ch3";
+		rm_io8_pwm1_ch4 = "/pinctrl/rm_io8/rm-io8-pwm1-ch4";
+		rm_io7_pwm1_ch5 = "/pinctrl/rm_io7/rm-io7-pwm1-ch5";
+		spi1 = "/spi@ff130000";
+	};
+
 	chosen {
 		bootargs = "earlycon=uart8250,mmio32,0xff0a0000 console=ttyFIQ0 storagemedia=sd root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw";
 	};
@@ -27,4 +51,41 @@
 		spi-rx-bus-width = <4>;
 		spi-tx-bus-width = <1>;
 	};
+};
+
+/* Overlay targets need phandles even though the compact base DTB has no -@. */
+&flexbus {
+	phandle = <&flexbus>;
+};
+
+&flexbus_dshot {
+	phandle = <&flexbus_dshot>;
+};
+
+&pwm1_8ch_0 {
+	phandle = <&pwm1_8ch_0>;
+};
+
+&pwm1_8ch_1 {
+	phandle = <&pwm1_8ch_1>;
+};
+
+&pwm1_8ch_2 {
+	phandle = <&pwm1_8ch_2>;
+};
+
+&pwm1_8ch_3 {
+	phandle = <&pwm1_8ch_3>;
+};
+
+&pwm1_8ch_4 {
+	phandle = <&pwm1_8ch_4>;
+};
+
+&pwm1_8ch_5 {
+	phandle = <&pwm1_8ch_5>;
+};
+
+&spi1 {
+	phandle = <&spi1>;
 };

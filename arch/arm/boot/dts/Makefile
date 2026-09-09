@@ -1243,6 +1243,13 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3506-powerfin-spinor-amp.dtb \
 	rk3506-powerfin-ramboot.dtb \
 	rk3506-powerfin-ramboot-amp.dtb
+
+# Keep the PowerFin base DTB compact.  The vendor DTC uses node_disabled to
+# prune unused nodes, while -@ retains every labelled node and grows this DTB
+# from about 61 KiB to more than 500 KiB.  The base DTS exports only the
+# symbols needed by these overlays instead.
+DTC_FLAGS_rk3506-powerfin-motor-pwm += -@ -Wno-node_disabled -Wno-node_empty
+DTC_FLAGS_rk3506-powerfin-spi1-pwm += -@ -Wno-node_disabled -Wno-node_empty
 dtb-$(CONFIG_ARCH_S3C24XX) += \
 	s3c2416-smdk2416.dtb
 dtb-$(CONFIG_ARCH_S3C64XX) += \
